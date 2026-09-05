@@ -188,12 +188,24 @@ For diff hunks pasted verbatim, use `"lang": "diff"`.
 
 Comments reach Claude two ways, and the page shows which one is live:
 
-1. **Monitor** - a running `explain watch` emits a line per submit, waking the
-   session that armed it. Requires that session to still be alive.
+1. **Monitor** - a running `explain watch --session <id>` emits a line per
+   submit, waking only the session that **owns** the page (set by
+   `render --session` / `claim`). Requires that session to still be alive.
 2. **Copy prompt** - the post-submit dialog (and the threads panel button) hands
    the user a self-contained prompt carrying the quoted region and the question.
    Pasting it into any Claude Code session works even with no hub access.
 
-`explain prompt [--slug S]` prints the same text; `explain watchers` reports
-whether anything is listening. Path (2) is the one that survives sandboxes,
-restarts, and closed sessions - never rely on (1) alone.
+`explain prompt [--slug S]` prints the same text; `explain watchers --slug S`
+reports who owns the page and whether they are listening. Path (2) is the one
+that survives sandboxes, restarts, and closed sessions - never rely on (1) alone.
+
+## Comment statuses
+
+| status | meaning | in `inbox`? | in `prompt`? |
+|---|---|---|---|
+| `saved` | written on the page, **not** sent | no (unless `--include-drafts`) | yes |
+| `pending` | Send to Claude pressed; owning session notified | yes | yes |
+| `answered` | Claude replied in the thread | no | no |
+
+The page's threads drawer has an **All / Saved / Sent / Answered / difit** filter
+and a full-screen toggle (the expand icon, or `F`).

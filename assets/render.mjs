@@ -703,12 +703,14 @@ async function buildHtml(content, ctx, opts) {
   <div class="th-head">
     <div class="th-title">${esc(t.threads)}<span class="pill pill--muted" id="th-count">0</span></div>
     <div class="th-head-actions">
+      <button class="th-icon" id="th-expand" type="button" title="${esc(t.expand)}">${SVG('<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>')}</button>
       <button class="th-icon" id="th-refresh" type="button" title="Refresh">${SVG('<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.7 2.2v3h-3"/>')}</button>
       <button class="th-icon" id="th-close" type="button" aria-label="Close">${SVG('<path d="M4 4l8 8M12 4l-8 8"/>')}</button>
     </div>
   </div>
   <div class="th-tabs">
     <button class="th-tab is-active" data-filter="all" type="button">${esc(t.tabAll)}</button>
+    <button class="th-tab" data-filter="saved" type="button">${esc(t.tabSaved)}</button>
     <button class="th-tab" data-filter="pending" type="button">${esc(t.tabPending)}</button>
     <button class="th-tab" data-filter="answered" type="button">${esc(t.tabAnswered)}</button>
     <button class="th-tab" data-filter="difit" type="button">${esc(t.tabDifit)}</button>

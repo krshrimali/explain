@@ -59,9 +59,18 @@ const en = {
 
   // threads
   tabAll: 'All',
-  tabPending: 'Pending',
+  tabSaved: 'Saved',
+  tabPending: 'Sent',
   tabAnswered: 'Answered',
   tabDifit: 'difit',
+  stSaved: 'saved',
+  stPending: 'sent',
+  stAnswered: 'answered',
+  expand: 'Full screen',
+  collapse: 'Exit full screen',
+  savedHint: 'Saved locally - not sent to Claude yet. Copy the prompt, or send it.',
+  ownerNone: 'No Claude session owns this page.',
+  ownerNotListening: 'The session that made this page is not listening right now.',
   sendPending: 'Send pending',
   copyPrompt: 'Copy prompt',
   live: 'live',
@@ -85,7 +94,7 @@ const en = {
 
   // send modal
   sentTitle: 'comments sent',
-  promptTitle: 'Prompt for pending comments',
+  promptTitle: 'Prompt for your comments',
   listeningTitle: 'A Claude session is listening.',
   listeningBody:
     'The answer will show up in this panel shortly - nothing else to do. The prompt below is just a backup.',
@@ -98,7 +107,7 @@ const en = {
   copied: 'Copied',
 
   // toasts
-  toastSavedDraft: 'Comment saved as draft - now press "Send to Claude"',
+  toastSavedDraft: 'Comment saved - copy the prompt, or press "Send to Claude"',
   toastSent: (n) => n + ' comment' + (n === 1 ? '' : 's') + ' sent to Claude',
   toastAnswered: 'Claude replied - check the threads',
   toastPageUpdated: 'Page updated - reloading',
@@ -163,7 +172,7 @@ const hinglish = {
   staleTitle: 'Is comment ke baad page badla hai',
 
   sentTitle: 'comments bheje',
-  promptTitle: 'Pending comments ka prompt',
+  promptTitle: 'Tumhare comments ka prompt',
   listeningTitle: 'Claude session sun raha hai.',
   listeningBody:
     'Jawaab thodi der mein isi panel mein aa jaayega - kuch karne ki zaroorat nahi. Neeche wala prompt sirf backup hai.',
@@ -173,7 +182,17 @@ const hinglish = {
   promptLabel: 'Ya ye prompt copy karke Claude Code session mein paste kar do',
   noWatcher: 'No watcher - paste karo',
 
-  toastSavedDraft: 'Comment draft mein save ho gaya - ab "Send to Claude" dabao',
+  toastSavedDraft: 'Comment save ho gaya - prompt copy karo, ya "Send to Claude" dabao',
+  tabSaved: 'Saved',
+  tabPending: 'Sent',
+  stSaved: 'saved',
+  stPending: 'sent',
+  stAnswered: 'answered',
+  expand: 'Full screen',
+  collapse: 'Exit full screen',
+  savedHint: 'Sirf save hua hai - Claude ko bheja nahi. Prompt copy karo, ya send kar do.',
+  ownerNone: 'Is page ka koi Claude session owner nahi hai.',
+  ownerNotListening: 'Jis session ne ye page banaya tha wo abhi sun nahi raha.',
   toastSent: (n) => n + ' comment Claude ko bhej diye',
   toastAnswered: 'Claude ne jawaab diya - threads dekho',
   toastPageUpdated: 'Page update ho gaya - reload kar raha hoon',
@@ -237,8 +256,17 @@ const hindi = {
   toExit: 'बाहर निकलने के लिए',
 
   tabAll: 'सभी',
-  tabPending: 'लंबित',
+  tabSaved: 'सहेजा',
+  tabPending: 'भेजा',
   tabAnswered: 'उत्तरित',
+  stSaved: 'सहेजा',
+  stPending: 'भेजा',
+  stAnswered: 'उत्तरित',
+  expand: 'पूरी स्क्रीन',
+  collapse: 'पूरी स्क्रीन बंद करें',
+  savedHint: 'सिर्फ़ सहेजा गया है - Claude को भेजा नहीं। प्रॉम्प्ट कॉपी करें, या भेज दें।',
+  ownerNone: 'इस पेज का कोई Claude सेशन स्वामी नहीं है।',
+  ownerNotListening: 'जिस सेशन ने यह पेज बनाया था वह अभी नहीं सुन रहा।',
   sendPending: 'लंबित भेजें',
   copyPrompt: 'प्रॉम्प्ट कॉपी करें',
   live: 'लाइव',
@@ -260,7 +288,7 @@ const hindi = {
   staleTitle: 'इस टिप्पणी के बाद पेज बदला है',
 
   sentTitle: 'टिप्पणियाँ भेजी गईं',
-  promptTitle: 'लंबित टिप्पणियों का प्रॉम्प्ट',
+  promptTitle: 'आपकी टिप्पणियों का प्रॉम्प्ट',
   listeningTitle: 'एक Claude सेशन सुन रहा है।',
   listeningBody: 'जवाब थोड़ी देर में इसी पैनल में आ जाएगा। नीचे वाला प्रॉम्प्ट सिर्फ़ बैकअप है।',
   idleTitle: 'अभी कोई Claude सेशन नहीं सुन रहा।',

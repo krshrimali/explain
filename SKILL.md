@@ -101,9 +101,14 @@ the default from now on.
 Write the file to your scratchpad, then:
 
 ```bash
-$EX render --slug <slug> --content /path/to/content.json
+$EX render --slug <slug> --content /path/to/content.json --session <SESSION_ID>
 $EX open   --slug <slug>     # prints the URL and opens a browser
 ```
+
+**`--session` matters.** It records which Claude session owns the page, and a
+submit only ever wakes that session. Use your own Claude Code session id (the
+one in your attribution footer) so it stays stable for the whole conversation.
+Without it the page is unowned: nobody gets woken, and the page says so.
 
 Read **`references/content-schema.md`** for every block type and
 **`references/authoring.md`** for the voice, depth bar, and review rubric. The
@@ -130,17 +135,27 @@ nothing and the user has to paste the prompt by hand.
 
 ```
 Monitor({
-  command: "node ~/.claude/skills/explain/assets/explain.mjs watch",
+  command: "node ~/.claude/skills/explain/assets/explain.mjs watch --session <SESSION_ID>",
   description: "explain-hub: comments from <slug> page + difit",
   persistent: true,
   timeout_ms: 3600000
 })
 ```
 
-Arm it **once per session**, not once per page - `watch` covers every page in the
-hub, and re-arming just duplicates notifications. While it runs it heartbeats to
-`watchers.json`, which is what turns the page's Send button dot green and makes
-the post-submit dialog say *"Claude session sun raha hai"*.
+Use the **same `<SESSION_ID>` you rendered with**. `watch` refuses to start
+without one, because a hub-wide watcher wakes every Claude session on the
+machine for every page - including pages another session built.
+
+Arm it **once per session**, not once per page - it covers every page *you* own.
+While it runs it heartbeats into `watchers/<session>.json`, which is what turns
+the page's Send button dot green and names the owning session in the dialog.
+
+To take over a page made by an earlier session:
+
+```bash
+$EX claim --slug <slug> --session <SESSION_ID>
+$EX watchers --slug <slug>     # who owns it, and are they listening
+```
 
 Then tell the user, in one short message: the page URL, the difit URL, what the
 page covers, and that they can drag a box anywhere to comment (or comment on any
@@ -148,8 +163,12 @@ line in difit) and you will answer in place.
 
 ### What the user sees on Submit
 
-The page POSTs to the hub, drafts flip to `pending`, a `SUBMIT` line lands in
-`events.log`, and a dialog opens showing either:
+A saved comment is **not** pending. Writing one leaves it `saved` (local only) -
+the user can copy its prompt without ever sending it. Only **Send to Claude**
+flips `saved -> pending` and notifies the owning session.
+
+On submit the page POSTs to the hub, a `SUBMIT` line lands in `events.log`, and
+a dialog opens showing either:
 
 - **green** - a session is listening; the answer will arrive in the panel, or
 - **amber** - nothing is listening; copy the prompt shown and paste it into any
@@ -162,9 +181,15 @@ can also get it any time from the threads panel's **Copy prompt** button, or fro
 the terminal:
 
 ```bash
-$EX prompt --slug <slug>     # same text, printed
-$EX watchers                 # is anything listening right now?
+$EX prompt --slug <slug>              # same text (includes saved, unsent comments)
+$EX inbox  --slug <slug> --include-drafts
+$EX watchers --slug <slug>            # who owns this page, and are they listening
+$EX watchers                          # every live session watcher
 ```
+
+`inbox` **excludes** saved comments by default - they were never sent, so they
+are not yours to answer unprompted. `prompt` includes them, because that is the
+copy-without-sending path.
 
 If you are handed that pasted prompt in a fresh session, just answer it - run
 `$EX inbox` first to confirm nothing changed, then reply as in Step 6. If the CLI

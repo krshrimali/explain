@@ -39,7 +39,12 @@ export function isClaude(author) {
 
 /* --------------------------------------------------------------- inbox --- */
 
-export async function buildInbox(slugFilter) {
+/**
+ * Pending comments awaiting Claude.
+ * `includeDrafts` adds comments the user saved but has NOT sent - the page's
+ * "Copy prompt" uses it so a comment can be copied without being submitted.
+ */
+export async function buildInbox(slugFilter, { includeDrafts = false } = {}) {
   const pages = listPages().filter((p) => !slugFilter || p.slug === slugFilter);
   const inbox = [];
   for (const p of pages) {
@@ -47,10 +52,12 @@ export async function buildInbox(slugFilter) {
     const data = readThreads(p.slug);
 
     for (const t of data.threads) {
-      if (t.status !== 'pending') continue;
+      const isDraft = t.status === 'draft';
+      if (t.status !== 'pending' && !(includeDrafts && isDraft)) continue;
       const last = t.messages[t.messages.length - 1];
       inbox.push({
         source: 'page',
+        draft: isDraft,
         slug: p.slug,
         pageTitle: p.title,
         threadId: t.id,
@@ -96,7 +103,9 @@ export function formatInbox(inbox) {
   if (!inbox.length) return 'Inbox khaali hai - koi pending comment nahi.';
   const lines = [`${inbox.length} pending comment(s):`, ''];
   inbox.forEach((it, i) => {
-    lines.push(`--- [${i + 1}] ${it.source.toUpperCase()} - ${it.slug} ---`);
+    lines.push(
+      `--- [${i + 1}] ${it.source.toUpperCase()}${it.draft ? ' (not sent - saved only)' : ''} - ${it.slug} ---`
+    );
     if (it.source === 'page') {
       lines.push(`thread: ${it.threadId}`);
       lines.push(`where:  ${it.where}${it.anchorId ? ` (anchor ${it.anchorId})` : ''}`);
@@ -176,8 +185,18 @@ export function buildPrompt(inbox, { slug } = {}) {
     'Lambe jawaab ke liye --body-file use karo. Agar page hi galat ya adhoora tha to ' +
       'content.json fix karke re-render bhi karo, aur thread mein bata do ki page update kar diya.'
   );
+  const hasDrafts = inbox.some((it) => it.draft);
   if (slug) {
-    out.push(`Pehle \`${SKILL_CLI} inbox --slug ${slug}\` chala kar latest state confirm kar lena.`);
+    out.push(
+      `Pehle \`${SKILL_CLI} inbox --slug ${slug}${hasDrafts ? ' --include-drafts' : ''}\` ` +
+        'chala kar latest state confirm kar lena.'
+    );
+  }
+  if (hasDrafts) {
+    out.push(
+      'Note: inmein se kuch comments "saved" hain (user ne Send to Claude nahi dabaya, ' +
+        'sirf prompt copy kiya). Unka jawaab bhi usi tarah post karo.'
+    );
   }
   return out.join('\n');
 }

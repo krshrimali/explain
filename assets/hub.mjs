@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ensureHub, pageDir, listPages, pageExists, readMeta, readThreads, writeThreads,
   createThread, addMessage, deleteThread, appendEvent, readHubState, writeHubState,
-  safeSlug, DEFAULT_PORT, PAGES_DIR, readWatcher,
+  safeSlug, DEFAULT_PORT, PAGES_DIR, readWatchers, pageOwner,
 } from './lib/store.mjs';
 import { buildInbox, buildPrompt } from './lib/inbox.mjs';
 
@@ -201,8 +201,8 @@ async function handle(req, res, base) {
 
   if (p === '/api/pages') return json(res, 200, { pages: listPages() });
 
-  // Is a Claude session actually listening for submits right now?
-  if (p === '/api/watchers') return json(res, 200, readWatcher());
+  // Every live watcher on the hub (the page-scoped view is under /api/p/:slug).
+  if (p === '/api/watchers') return json(res, 200, { watchers: readWatchers() });
 
   // /static/*
   if (p.startsWith('/static/')) {
@@ -297,12 +297,16 @@ async function handle(req, res, base) {
       return json(res, 200, { thread: t });
     }
 
+    if (rest === '/watcher') return json(res, 200, pageOwner(slug));
+
     if (rest === '/prompt') {
-      const inbox = await buildInbox(slug);
+      // Drafts included: the user may want the prompt without submitting.
+      const inbox = await buildInbox(slug, { includeDrafts: true });
       return json(res, 200, {
         count: inbox.length,
+        drafts: inbox.filter((i) => i.draft).length,
         prompt: buildPrompt(inbox, { slug }),
-        watcher: readWatcher(),
+        watcher: pageOwner(slug),
       });
     }
 
@@ -323,12 +327,12 @@ async function handle(req, res, base) {
         new: flipped.length,
         title: readMeta(slug).title || slug,
       });
-      const inbox = await buildInbox(slug);
+      const inbox = await buildInbox(slug, { includeDrafts: true });
       return json(res, 200, {
         ok: true,
         submitted: flipped.length,
         pending: pending.length,
-        watcher: readWatcher(),
+        watcher: pageOwner(slug),
         prompt: buildPrompt(inbox, { slug }),
       });
     }

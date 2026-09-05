@@ -559,7 +559,7 @@
       var el = document.createElement('div');
       var cls = 'marker';
       if (t.status === 'answered') cls += ' marker--answered';
-      else if (t.status === 'draft') cls += ' marker--draft';
+      else if (t.status === 'draft') cls += ' marker--saved';
       if (stale) cls += ' marker--outdated';
       el.className = cls;
       el.dataset.threadId = t.id;
@@ -594,12 +594,33 @@
 
   /* ------------------------------------------------------ threads panel -- */
 
+  var FULL_KEY = 'explain-threads-full';
+
+  function setThreadsFull(full) {
+    document.body.classList.toggle('threads-full', full);
+    var btn = $('#th-expand');
+    if (btn) btn.title = full ? T('collapse', 'Exit full screen') : T('expand', 'Full screen');
+    try { localStorage.setItem(FULL_KEY, full ? '1' : ''); } catch (e) {}
+    scheduleRedraw();
+  }
+
+  function threadsFull() {
+    return document.body.classList.contains('threads-full');
+  }
+
   function openThreads(open) {
     document.body.classList.toggle('threads-open', open !== false);
     if (open !== false) scheduleRedraw();
   }
   $('#btn-threads').addEventListener('click', function () { openThreads(!document.body.classList.contains('threads-open')); });
-  $('#th-close').addEventListener('click', function () { openThreads(false); });
+  $('#th-close').addEventListener('click', function () {
+    if (threadsFull()) setThreadsFull(false);
+    openThreads(false);
+  });
+  $('#th-expand').addEventListener('click', function () { setThreadsFull(!threadsFull()); });
+  try {
+    if (localStorage.getItem(FULL_KEY)) setThreadsFull(true);
+  } catch (e) {}
   $('#th-refresh').addEventListener('click', function () { refreshThreads(); refreshDifit(); });
 
   $$('.th-tab').forEach(function (tab) {
@@ -626,10 +647,17 @@
     $$('.marker').forEach(function (m) { m.classList.toggle('is-active', m.dataset.threadId === id); });
   }
 
-  function statusOf(t) {
-    if (t.status === 'answered') return 'answered';
-    if (t.status === 'draft') return 'draft';
+  // draft = saved locally, never sent. pending = actually sent to Claude.
+  function statusOf(th) {
+    if (th.status === 'answered') return 'answered';
+    if (th.status === 'draft') return 'saved';
     return 'pending';
+  }
+
+  function statusLabel(kind) {
+    if (kind === 'answered') return T('stAnswered', 'answered');
+    if (kind === 'saved') return T('stSaved', 'saved');
+    return T('stPending', 'sent');
   }
 
   function renderThreads() {
@@ -637,7 +665,8 @@
     var items = state.threads.slice();
     var showDifit = state.filter === 'difit' || state.filter === 'all';
 
-    if (state.filter === 'pending') items = items.filter(function (t) { return t.status === 'pending' || t.status === 'draft'; });
+    if (state.filter === 'saved') items = items.filter(function (t) { return t.status === 'draft'; });
+    else if (state.filter === 'pending') items = items.filter(function (t) { return t.status === 'pending'; });
     else if (state.filter === 'answered') items = items.filter(function (t) { return t.status === 'answered'; });
     else if (state.filter === 'difit') items = [];
 
@@ -694,7 +723,8 @@
         '<span class="thread-num">' + (i + 1) + '</span>' +
         '<span class="thread-where" title="' + escapeHtml(where) + '">' + escapeHtml(where) + '</span>' +
         (stale ? '<span class="st st--outdated" title="' + escapeHtml(T('staleTitle', 'The page changed after this comment')) + '">' + escapeHtml(T('stale', 'stale')) + '</span>' : '') +
-        '<span class="st st--' + st + '">' + st + '</span>' +
+        '<span class="st st--' + st + '" title="' + escapeHtml(st === 'saved' ? T('savedHint', '') : '') + '">' +
+          escapeHtml(statusLabel(st)) + '</span>' +
       '</div>' +
       '<div class="thread-body">' +
         (t.quote ? '<div class="th-quote">' + escapeHtml(t.quote.slice(0, 320)) + (t.quote.length > 320 ? '…' : '') + '</div>' : '') +
@@ -793,7 +823,8 @@
   var sentBackdrop = $('#sent-backdrop');
 
   function openSentModal(res) {
-    var listening = res.watcher && res.watcher.alive;
+    var w = res.watcher || {};
+    var listening = !!w.listening;
     var count = res.submitted != null ? res.submitted : (res.count || 0);
 
     $('#sm-title').textContent = res.submitted != null
@@ -801,11 +832,15 @@
       : T('promptTitle', 'Prompt for pending comments');
 
     $('#sm-status').className = 'sm-status ' + (listening ? 'is-live' : 'is-idle');
-    $('#sm-status').innerHTML = '<span class="sm-dot"></span><div><b>' +
-      escapeHtml(listening ? T('listeningTitle', 'A Claude session is listening.')
-                           : T('idleTitle', 'No Claude session is listening.')) + '</b>' +
+    var title = listening
+      ? T('listeningTitle', 'A Claude session is listening.')
+      : (w.owned ? T('ownerNotListening', 'The owning session is not listening.')
+                 : T('ownerNone', 'No Claude session owns this page.'));
+    $('#sm-status').innerHTML = '<span class="sm-dot"></span><div><b>' + escapeHtml(title) + '</b>' +
       escapeHtml(listening ? T('listeningBody', 'The answer will appear in this panel.')
-                           : T('idleBody', 'Copy the prompt below into a Claude Code session.')) + '</div>';
+                           : T('idleBody', 'Copy the prompt below into a Claude Code session.')) +
+      (w.sessionId ? '<div class="sm-owner">session: ' + escapeHtml(w.sessionId) + '</div>' : '') +
+      '</div>';
 
     $('#sm-prompt').value = res.prompt || '';
     $('#sm-hint').textContent = listening ? T('monitorArmed', 'Monitor armed') : T('noWatcher', 'No watcher - paste it');
@@ -852,6 +887,7 @@
   });
 
   $('#th-prompt').addEventListener('click', function () {
+    // Includes saved-but-unsent comments, so you can copy without sending.
     api('/prompt').then(function (res) {
       if (!res.count) { toast(T('toastNoPending', 'No pending comments')); return; }
       openSentModal(res);
@@ -859,16 +895,17 @@
   });
 
   function refreshWatcher() {
-    return fetch((CFG.base || '') + '/api/watchers')
-      .then(function (r) { return r.json(); })
+    // Page-scoped: only the session that owns this page counts as listening.
+    return api('/watcher')
       .then(function (w) {
         state.watcher = w;
         var dot = $('#listen-dot');
         if (dot) {
-          dot.classList.toggle('is-alive', !!w.alive);
-          dot.title = w.alive
-            ? 'Claude session sun raha hai — submit seedha pahunchega'
-            : 'Koi session nahi sun raha — submit ke baad prompt copy karna padega';
+          dot.classList.toggle('is-alive', !!w.listening);
+          dot.title = w.listening
+            ? T('listeningTitle', 'A Claude session is listening.') + (w.sessionId ? ' (' + w.sessionId + ')' : '')
+            : (w.owned ? T('ownerNotListening', 'Owning session is not listening.')
+                       : T('ownerNone', 'No session owns this page.'));
         }
       })
       .catch(function () {});
@@ -977,6 +1014,7 @@
       if (!sentModal.hidden) { closeSentModal(); return; }
       if (!composer.hidden) { closeComposer(); return; }
       if (state.commentMode) { setCommentMode(false); return; }
+      if (threadsFull()) { setThreadsFull(false); return; }
       if (document.body.classList.contains('threads-open')) openThreads(false);
       return;
     }
@@ -984,6 +1022,11 @@
     var k = e.key.toLowerCase();
     if (k === 'c') { e.preventDefault(); setCommentMode(!state.commentMode); }
     else if (k === 't') { e.preventDefault(); openThreads(!document.body.classList.contains('threads-open')); }
+    else if (k === 'f') {
+      e.preventDefault();
+      if (!document.body.classList.contains('threads-open')) openThreads(true);
+      setThreadsFull(!threadsFull());
+    }
     else if (k === 'd' && CFG.difit && CFG.difit.url) { e.preventDefault(); window.open(CFG.difit.url, '_blank', 'noopener'); }
   });
 

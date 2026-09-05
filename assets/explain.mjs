@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import {
   ensureHub, HUB_ROOT, EVENTS_LOG, DEFAULT_PORT, pageExists, listPages,
   readMeta, writeMeta, readThreads, writeThreads, addMessage, appendEvent, readHubState,
-  writeHubState, safeSlug, heartbeat, clearWatcher, readWatcher, readConfig, writeConfig,
+  writeHubState, safeSlug, heartbeat, clearWatcher, readWatchers, watcherFor, pageOwner,
+  readConfig, writeConfig,
 } from './lib/store.mjs';
 import {
   buildInbox, formatInbox, buildPrompt, difitAlive, difitThreads, lineOf, isClaude,
@@ -164,15 +165,36 @@ function hashCode(s) {
 // One stdout line per actionable event. Monitor turns each into a notification.
 async function watch(args) {
   const intervalMs = Number(args.interval) || 3000;
-  // Tell the page a session is listening, and stop claiming so when we exit.
-  heartbeat(process.pid);
+  const watchAll = Boolean(args.all);
+  const sessionId = args.session ? String(args.session).trim() : null;
+  if (!sessionId && !watchAll) {
+    die('watch needs --session <id> so a submit only wakes the session that owns the page (or --all to watch everything)');
+  }
+  const me = sessionId || '__all__';
+
+  // Only deliver a page to the session that owns it. Without this every
+  // session on the machine gets woken by every submit.
+  const mine = (slug) => {
+    if (watchAll) return true;
+    return readMeta(slug).sessionId === sessionId;
+  };
+
+  if (watchAll) {
+    // Self-announcing: --all re-creates the "every session gets every comment"
+    // behaviour, so make sure it is visible in the notification stream.
+    console.log(
+      'EXPLAIN-WARN watch --all: ye watcher HAR page ke comments lega, sirf apne nahi. ' +
+        'Isse band karke `watch --session <id>` use karo.'
+    );
+  }
+  heartbeat(me, process.pid);
   const stop = () => {
-    clearWatcher();
+    clearWatcher(me);
     process.exit(0);
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
-  process.on('exit', () => clearWatcher());
+  process.on('exit', () => clearWatcher(me));
   let offset = 0;
   try {
     offset = fs.statSync(EVENTS_LOG).size;
@@ -183,7 +205,7 @@ async function watch(args) {
 
   // Anything already submitted before this watcher started would otherwise be
   // invisible (the log offset starts at EOF), so announce the backlog once.
-  const backlog = (await buildInbox(null)).filter((it) => it.source === 'page');
+  const backlog = (await buildInbox(null)).filter((it) => it.source === 'page' && mine(it.slug));
   if (backlog.length) {
     const slugs = [...new Set(backlog.map((it) => it.slug))].join(', ');
     console.log(`EXPLAIN-COMMENTS slug=${slugs} count=${backlog.length} — pehle se ${backlog.length} comment pending hain. Run: explain inbox`);
@@ -191,6 +213,7 @@ async function watch(args) {
 
   // Seed difit threads that already have a Claude reply so we do not re-announce.
   for (const p of listPages()) {
+    if (!mine(p.slug)) continue;
     const port = readMeta(p.slug).difit?.port;
     if (!port) continue;
     for (const t of await difitThreads(port)) {
@@ -200,7 +223,7 @@ async function watch(args) {
   }
 
   const tick = async () => {
-    heartbeat(process.pid);
+    heartbeat(me, process.pid);
 
     // 1. new lines in the hub event log (page comments submitted / replied)
     try {
@@ -215,6 +238,7 @@ async function watch(args) {
           if (!line.trim()) continue;
           try {
             const ev = JSON.parse(line);
+            if (ev.slug && !mine(ev.slug)) continue; // another session's page
             if (ev.type === 'SUBMIT') {
               console.log(`EXPLAIN-COMMENTS slug=${ev.slug} count=${ev.count} — user ne ${ev.count} comment bheje hain on "${ev.title || ev.slug}". Run: explain inbox --slug ${ev.slug}`);
             } else if (ev.type === 'REPLY' && ev.from === 'human') {
@@ -229,6 +253,7 @@ async function watch(args) {
 
     // 2. difit threads awaiting a Claude reply
     for (const p of listPages()) {
+      if (!mine(p.slug)) continue;
       const meta = readMeta(p.slug);
       const port = meta.difit?.port;
       if (!port) continue;
@@ -265,7 +290,8 @@ const USAGE = `explain <command> [options]
   config [--language L]                  show/set hub defaults (language: hinglish|english|hindi|<any>)
   status [--slug S]                      hub + pages + difit health
   list                                   list explainer pages
-  render --slug S --content <file> [--language L]   render/refresh a page
+  render --slug S --content <file> [--language L] [--session ID]  render/refresh a page
+  claim --slug S --session ID            hand an existing page to a session
   url --slug S                           print the page URL
   open --slug S                          open the page in a browser
 
@@ -273,15 +299,16 @@ const USAGE = `explain <command> [options]
   difit stop --slug S
   difit threads --slug S
 
-  inbox [--slug S] [--json]              pending human comments (page + difit)
+  inbox [--slug S] [--json] [--include-drafts]   pending comments (page + difit)
   prompt [--slug S]                      paste-ready prompt for another Claude session
-  watchers                               is a Claude session listening right now?
+  watchers [--slug S]                    who is listening; for --slug, the page's owner
   reply --slug S --thread ID --body TXT  answer a page thread
   difit-reply --slug S --file F --side new|old --line N --body TXT
   difit-note  --slug S --file F --side new|old --line N --body TXT   (new difit thread)
   resolve --slug S --thread ID           mark a page thread resolved
 
-  watch [--interval MS]                  stream one line per pending comment (for Monitor)
+  watch --session ID [--interval MS]     stream comments for THIS session's pages only
+        [--all]                          ...or every page, owned or not (legacy)
 `;
 
 async function main() {
@@ -351,10 +378,19 @@ async function main() {
       const meta = readMeta(slug);
       if (!content.difit && meta.difit) content.difit = meta.difit;
       if (args.language) content.language = String(args.language).toLowerCase().trim();
+      const sessionId = args.session ? String(args.session).trim() : null;
       const { render } = await import('./render.mjs');
       const res = await render(slug, content, { base: '' });
+      // Ownership decides which session a submit wakes.
+      if (sessionId) writeMeta(slug, { ...readMeta(slug), sessionId });
       const hub = await hubUp(Number(args.port) || readHubState().port || DEFAULT_PORT);
-      return say({ ...res, language: readMeta(slug).language, url: `${hub.url}/p/${res.slug}/`, hub: hub.url });
+      return say({
+        ...res,
+        language: readMeta(slug).language,
+        sessionId: readMeta(slug).sessionId || null,
+        url: `${hub.url}/p/${res.slug}/`,
+        hub: hub.url,
+      });
     }
 
     case 'url': {
@@ -395,19 +431,32 @@ async function main() {
     }
 
     case 'inbox': {
-      const inbox = await buildInbox(args.slug ? safeSlug(args.slug) : null);
+      const inbox = await buildInbox(args.slug ? safeSlug(args.slug) : null, {
+        includeDrafts: Boolean(args['include-drafts']),
+      });
       return say(args.json ? { count: inbox.length, inbox } : formatInbox(inbox));
     }
 
     case 'prompt': {
       const slug = args.slug ? safeSlug(args.slug) : null;
-      const inbox = await buildInbox(slug);
+      // Drafts are included so a comment can be copied without being sent.
+      const inbox = await buildInbox(slug, { includeDrafts: args['no-drafts'] !== true });
       const text = buildPrompt(inbox, { slug });
       return say(args.json ? { count: inbox.length, prompt: text } : text);
     }
 
-    case 'watchers':
-      return say(readWatcher());
+    case 'claim': {
+      const slug = safeSlug(args.slug || die('--slug required'));
+      const sessionId = String(args.session || die('--session required')).trim();
+      if (!pageExists(slug)) die(`no such page: ${slug}`);
+      writeMeta(slug, { ...readMeta(slug), sessionId });
+      return say({ ok: true, slug, sessionId });
+    }
+
+    case 'watchers': {
+      if (args.slug) return say(pageOwner(safeSlug(args.slug)));
+      return say({ watchers: readWatchers() });
+    }
 
     case 'reply': {
       const slug = safeSlug(args.slug || die('--slug required'));

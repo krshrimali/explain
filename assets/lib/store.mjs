@@ -10,7 +10,7 @@ export const HUB_ROOT =
 export const PAGES_DIR = path.join(HUB_ROOT, 'pages');
 export const EVENTS_LOG = path.join(HUB_ROOT, 'events.log');
 export const STATE_FILE = path.join(HUB_ROOT, 'hub.json');
-export const WATCHERS_FILE = path.join(HUB_ROOT, 'watchers.json');
+export const WATCHERS_DIR = path.join(HUB_ROOT, 'watchers');
 export const CONFIG_FILE = path.join(HUB_ROOT, 'config.json');
 export const DEFAULT_PORT = Number(process.env.EXPLAIN_HUB_PORT || 7788);
 
@@ -241,38 +241,81 @@ export function writeConfig(patch) {
 
 /* ------------------------------------------------------------- watchers -- */
 
-// A running `explain watch` refreshes this file every tick. The page reads it to
-// decide whether a Claude session is actually listening, or whether the user
-// needs to paste the prompt into one themselves.
+// One heartbeat file per Claude session, so several sessions can watch the hub
+// at once without clobbering each other. A page is delivered only to the
+// session that owns it (meta.sessionId), which is what keeps a submit from
+// waking every session on the machine.
 const WATCHER_STALE_MS = 20000;
 
-export function heartbeat(pid) {
-  ensureHub();
-  writeJson(WATCHERS_FILE, { pid, at: new Date().toISOString(), interval: WATCHER_STALE_MS });
+function watcherFile(sessionId) {
+  return path.join(WATCHERS_DIR, `${String(sessionId).replace(/[^A-Za-z0-9._-]/g, '_')}.json`);
 }
 
-export function readWatcher() {
-  const w = readJson(WATCHERS_FILE, null);
-  if (!w || !w.at) return { alive: false, lastSeen: null, pid: null };
-  const age = Date.now() - new Date(w.at).getTime();
-  let alive = age < WATCHER_STALE_MS;
-  // A heartbeat file outlives the process that wrote it, so confirm the pid.
-  if (alive && w.pid) {
+export function heartbeat(sessionId, pid) {
+  fs.mkdirSync(WATCHERS_DIR, { recursive: true });
+  writeJson(watcherFile(sessionId), {
+    sessionId,
+    pid,
+    at: new Date().toISOString(),
+    staleMs: WATCHER_STALE_MS,
+  });
+}
+
+function isLive(w) {
+  if (!w || !w.at) return false;
+  if (Date.now() - new Date(w.at).getTime() >= WATCHER_STALE_MS) return false;
+  // The file outlives the process that wrote it, so confirm the pid too.
+  if (w.pid) {
     try {
       process.kill(w.pid, 0);
     } catch {
-      alive = false;
+      return false;
     }
   }
-  return { alive, lastSeen: w.at, pid: w.pid, ageMs: age };
+  return true;
 }
 
-export function clearWatcher() {
+/** Every live watcher, newest heartbeat first. */
+export function readWatchers() {
+  let files = [];
   try {
-    fs.rmSync(WATCHERS_FILE, { force: true });
+    files = fs.readdirSync(WATCHERS_DIR).filter((f) => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  return files
+    .map((f) => readJson(path.join(WATCHERS_DIR, f), null))
+    .filter((w) => w && isLive(w))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+/** Is this specific session listening? */
+export function watcherFor(sessionId) {
+  if (!sessionId) return null;
+  const w = readJson(watcherFile(sessionId), null);
+  return isLive(w) ? w : null;
+}
+
+export function clearWatcher(sessionId) {
+  try {
+    fs.rmSync(watcherFile(sessionId), { force: true });
   } catch {
     /* nothing to clear */
   }
+}
+
+/** Which session owns a page, and is it listening right now? */
+export function pageOwner(slug) {
+  const meta = readMeta(slug);
+  const sessionId = meta.sessionId || null;
+  const watcher = sessionId ? watcherFor(sessionId) : null;
+  return {
+    sessionId,
+    owned: Boolean(sessionId),
+    listening: Boolean(watcher),
+    lastSeen: watcher ? watcher.at : null,
+    otherWatchers: readWatchers().filter((w) => w.sessionId !== sessionId).length,
+  };
 }
 
 export function hash(str) {

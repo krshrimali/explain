@@ -1028,3 +1028,41 @@ body.threads-open .threads { transform: none; }
 .msg-body table { font-size: 12.5px; }
 .msg-body thead th { padding: 6px 9px; font-size: 10px; }
 .msg-body tbody td { padding: 6px 9px; }
+
+/* ------------------------------------------------- threads: full screen --- */
+/* Opt-in via the expand button or F. The panel takes the whole viewport and
+   the reading column is hidden, which is what you want when a thread has a
+   long code-heavy answer in it. */
+body.threads-full .threads {
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%; max-width: none;
+  border-left: 0; box-shadow: none;
+  z-index: 100;
+}
+body.threads-full .th-head { height: var(--topbar-h); padding-left: 22px; }
+body.threads-full .th-title { font-size: 16px; }
+body.threads-full .th-tabs,
+body.threads-full .th-list,
+body.threads-full .th-foot { padding-left: max(22px, calc((100vw - 900px) / 2)); padding-right: max(22px, calc((100vw - 900px) / 2)); }
+body.threads-full .th-list { gap: 14px; }
+body.threads-full .thread-body { padding: 14px 16px; }
+body.threads-full .msg-body { font-size: 14.5px; }
+body.threads-full .th-quote { max-height: 160px; }
+body.threads-full .marker-layer,
+body.threads-full .progress { display: none; }
+/* The page behind is inert while full screen is up. */
+body.threads-full .shell { visibility: hidden; }
+body.threads-full.threads-open .shell { padding-right: 0; }
+
+@media (max-width: 700px) {
+  body.threads-full .th-tabs,
+  body.threads-full .th-list,
+  body.threads-full .th-foot { padding-left: 14px; padding-right: 14px; }
+}
+
+/* -------------------------------------------------- saved vs sent status --- */
+.st--saved { background: var(--warn-soft); color: var(--warn); }
+.thread--saved .thread-num { background: var(--warn); }
+.marker--saved { border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.marker--saved .marker-pin { background: var(--warn); }
+.sm-owner { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
