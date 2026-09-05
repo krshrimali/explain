@@ -1,0 +1,12 @@
+{
+  "name": "explain-skill-assets",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "difit": "^5.0.12",
+    "marked": "^16.0.0",
+    "shiki": "^3.0.0",
+    "mermaid": "^11.13.0"
+  }
+}
