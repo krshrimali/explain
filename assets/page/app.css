@@ -152,12 +152,12 @@ kbd {
   position: sticky; top: 0; z-index: 60;
   height: var(--topbar-h);
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 0 16px;
+  padding: 0 16px; min-width: 0;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: saturate(180%) blur(14px);
   border-bottom: 1px solid var(--border);
 }
-.tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; overflow: hidden; }
 .tb-home { display: flex; }
 .tb-logo {
   width: 26px; height: 26px; border-radius: 7px; flex: none;
@@ -171,7 +171,7 @@ kbd {
 }
 .tb-sub { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-3); line-height: 1.4; }
 .tb-target { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34vw; font-family: var(--mono); }
-.tb-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.tb-right { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
 
 .badge {
   font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
@@ -623,7 +623,12 @@ pre.shiki[data-lang="diff"] .line { padding-left: 0; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); cursor: pointer; text-decoration: underline; }
 
 /* --------------------------------------------------- bbox comment mode --- */
-.bbox-layer { position: absolute; inset: 0; pointer-events: none; z-index: 40; display: none; }
+.bbox-layer {
+  /* Fixed, not absolute: an absolutely-positioned full-document overlay feeds
+     back into the document height it was sized from. Drags use pageX/pageY,
+     so a viewport-sized capture layer is equivalent. */
+  position: fixed; inset: 0; pointer-events: none; z-index: 40; display: none;
+}
 body.comment-mode .bbox-layer { display: block; pointer-events: auto; cursor: crosshair; }
 body.comment-mode { user-select: none; -webkit-user-select: none; }
 body.comment-mode .doc, body.comment-mode .toc { pointer-events: none; }
@@ -650,7 +655,12 @@ body.comment-mode .doc, body.comment-mode .toc { pointer-events: none; }
   background: var(--surface); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border);
 }
 
-.marker-layer { position: absolute; inset: 0; pointer-events: none; z-index: 38; }
+.marker-layer {
+  /* Zero-sized anchor at the document origin; markers are positioned children
+     in document coordinates. Never give this a height - see bbox-layer. */
+  position: absolute; top: 0; left: 0; width: 0; height: 0;
+  pointer-events: none; z-index: 38;
+}
 .marker {
   position: absolute; pointer-events: auto; border-radius: 5px;
   border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
@@ -729,10 +739,10 @@ body.comment-mode .doc, body.comment-mode .toc { pointer-events: none; }
 .threads {
   /* Starts below the topbar so the toolbar buttons stay clickable while open. */
   position: fixed; top: var(--topbar-h); right: 0; bottom: 0; z-index: 55;
-  width: var(--threads-w); max-width: 100vw;
+  width: min(var(--threads-w), 100vw); max-width: 100vw;
   background: var(--surface); border-left: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; overflow: hidden;
   transform: translateX(100%); transition: transform .22s cubic-bezier(.32, .72, 0, 1);
 }
 body.threads-open .threads { transform: none; }
@@ -753,11 +763,22 @@ body.threads-open .threads { transform: none; }
 }
 .th-tab:hover { background: var(--surface-2); color: var(--text); }
 .th-tab.is-active { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.th-list { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-.th-empty { text-align: center; color: var(--text-3); font-size: 13px; padding: 44px 20px; line-height: 1.7; }
+.th-list {
+  flex: 1 1 auto;
+  /* min-height:0 is required: a flex item defaults to min-height:auto, which
+     pins it to its content height so overflow-y:auto never scrolls and the
+     footer gets pushed out of the panel. */
+  min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.th-empty { flex: 0 0 auto; text-align: center; color: var(--text-3); font-size: 13px; padding: 44px 20px; line-height: 1.7; }
 .th-empty b { display: block; color: var(--text-2); font-size: 14px; margin-bottom: 6px; }
 
 .thread {
+  /* The list is a column flex container, so cards must not shrink - otherwise
+     they compress to fit instead of overflowing, and nothing ever scrolls. */
+  flex: 0 0 auto;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface-2); overflow: hidden;
   transition: border-color .13s ease, box-shadow .13s ease;
@@ -839,6 +860,7 @@ body.threads-open .threads { transform: none; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .th-status.is-off .live-dot { background: var(--text-3); }
 .th-difit-link {
+  flex: 0 0 auto;
   display: block; margin: 0 0 4px; padding: 10px 12px; border-radius: var(--radius);
   background: var(--purple-soft); border: 1px solid color-mix(in srgb, var(--purple) 25%, transparent);
   font-size: 12.5px; color: var(--text-2); text-decoration: none;
@@ -900,6 +922,23 @@ body.threads-open .threads { transform: none; }
 .hx-empty code { font-family: var(--mono); background: var(--surface-3); padding: 2px 7px; border-radius: 5px; }
 
 /* ------------------------------------------------------------ responsive - */
+/* Browser zoom shrinks the CSS viewport, so these thresholds double as the
+   zoom story: drop optional toolbar chrome well before anything can overflow. */
+@media (max-width: 1180px) {
+  .btn kbd { display: none; }
+  .btn-meta { display: none; }
+  .tb-title { max-width: 30vw; }
+}
+
+/* Narrower still (or zoomed further): drop the button labels and keep the
+   icons, so the toolbar shrinks instead of overflowing. */
+@media (max-width: 860px) {
+  .btn .lbl { display: none; }
+  .btn { padding: 0 9px; gap: 5px; }
+  .tb-sub { display: none; }
+  .tb-title { max-width: 40vw; font-size: 13px; }
+}
+
 @media (max-width: 1080px) {
   .shell { grid-template-columns: 1fr; gap: 0; padding: 0 20px 100px; }
   .toc { display: none; }
@@ -911,7 +950,6 @@ body.threads-open .threads { transform: none; }
   body { font-size: 15px; }
   .threads { width: 100%; }
   .btn kbd, .btn-meta { display: none; }
-  .btn--difit span:not(.btn-dot) { display: none; }
   .difit-card { flex-direction: column; align-items: stretch; }
   .compare { grid-template-columns: 1fr; }
   .kv-row { grid-template-columns: 1fr; }
@@ -937,7 +975,7 @@ body.threads-open .threads { transform: none; }
   top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(660px, calc(100vw - 32px));
   max-height: min(84vh, 760px);
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; overflow: hidden;
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   animation: pop .16s ease;
@@ -964,7 +1002,7 @@ body.threads-open .threads { transform: none; }
   letter-spacing: .08em; text-transform: uppercase; color: var(--text-3);
 }
 .sm-prompt {
-  margin: 0 16px; padding: 12px 14px; flex: 1; min-height: 190px;
+  margin: 0 16px; padding: 12px 14px; flex: 1 1 auto; min-height: 120px;
   font-family: var(--mono); font-size: 12px; line-height: 1.6;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--code-bg); color: var(--text); resize: vertical;

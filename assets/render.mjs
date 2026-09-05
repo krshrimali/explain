@@ -638,11 +638,11 @@ async function buildHtml(content, ctx, opts) {
       difit?.url
         ? `<a class="btn btn--difit" href="${esc(
             difit.url
-          )}" target="_blank" rel="noopener" id="difit-link"><span class="btn-dot" id="difit-dot" title="difit status"></span>${esc(t.codeDiff)}<span class="btn-meta">difit</span></a>`
+          )}" target="_blank" rel="noopener" id="difit-link"><span class="btn-dot" id="difit-dot" title="difit status"></span><span class="lbl">${esc(t.codeDiff)}</span><span class="btn-meta">difit</span></a>`
         : ''
     }
-    <button class="btn btn--ghost" id="btn-comment-mode" type="button" title="${esc(t.comment)} (C)">${ICONS.comment}${esc(t.comment)}<kbd>C</kbd></button>
-    <button class="btn btn--primary" id="btn-submit" type="button" disabled><span class="btn-dot" id="listen-dot" title="Claude session status"></span>${esc(t.sendToClaude)}<span class="pill" id="pending-count">0</span></button>
+    <button class="btn btn--ghost" id="btn-comment-mode" type="button" title="${esc(t.comment)} (C)">${ICONS.comment}<span class="lbl">${esc(t.comment)}</span><kbd>C</kbd></button>
+    <button class="btn btn--primary" id="btn-submit" type="button" disabled><span class="btn-dot" id="listen-dot" title="Claude session status"></span><span class="lbl">${esc(t.sendToClaude)}</span><span class="pill" id="pending-count">0</span></button>
     <button class="btn btn--ghost btn--icon" id="btn-threads" type="button" title="${esc(t.threads)} (T)">${ICONS.threads}<span class="pill pill--muted" id="thread-count">0</span></button>
     <button class="btn btn--ghost btn--icon" id="btn-theme" type="button" title="Toggle theme"><span id="theme-ico">${ICONS.auto}</span></button>
   </div>

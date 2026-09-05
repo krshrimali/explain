@@ -387,7 +387,6 @@
     var btn = $('#btn-comment-mode');
     if (btn) btn.classList.toggle('is-active', on);
     if (on) {
-      bboxLayer.style.height = docHeight() + 'px';
       if (!hintEl) {
         hintEl = document.createElement('div');
         hintEl.className = 'bbox-hint';
@@ -539,6 +538,16 @@
 
   /* ------------------------------------------------------------ markers -- */
 
+  // A marker overlays real content, so it must never extend the scrollable area.
+  // Clamping here means a stale or malformed anchor degrades to a smaller box
+  // instead of stretching the page.
+  function clampToDoc(box) {
+    var maxW = document.documentElement.clientWidth;
+    var x = Math.max(0, Math.min(box.x, maxW - 8));
+    var w = Math.max(8, Math.min(box.w, maxW - x));
+    return { x: x, y: Math.max(0, box.y), w: w, h: Math.max(8, box.h) };
+  }
+
   function drawMarkers() {
     markerLayer.innerHTML = '';
     var visible = state.threads.filter(function (t) { return t.anchor && t.status !== 'resolved'; });
@@ -546,6 +555,7 @@
       var box = resolveAnchor(t.anchor);
       var stale = !box || anchorChanged(t.anchor);
       if (!box) return;
+      box = clampToDoc(box);
       var el = document.createElement('div');
       var cls = 'marker';
       if (t.status === 'answered') cls += ' marker--answered';
@@ -568,7 +578,6 @@
       });
       markerLayer.appendChild(el);
     });
-    markerLayer.style.height = docHeight() + 'px';
   }
 
   var redrawTimer = null;
@@ -577,6 +586,10 @@
     redrawTimer = setTimeout(drawMarkers, 90);
   }
   window.addEventListener('resize', scheduleRedraw);
+  if (window.visualViewport) {
+    // Pinch-zoom changes layout without firing a window resize.
+    window.visualViewport.addEventListener('resize', scheduleRedraw);
+  }
   document.addEventListener('toggle', scheduleRedraw, true);
 
   /* ------------------------------------------------------ threads panel -- */
