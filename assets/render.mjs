@@ -578,9 +578,9 @@ async function buildHtml(content, ctx, opts) {
 
   const tocHtml = toc
     .map(
-      (t) =>
-        `<a class="toc-link" href="#${t.id}" data-toc="${t.id}"><span class="toc-dot"></span><span class="toc-text">${esc(
-          t.title
+      (item) =>
+        `<a class="toc-link" href="#${item.id}" data-toc="${item.id}"><span class="toc-dot"></span><span class="toc-text">${esc(
+          item.title
         )}</span></a>`
     )
     .join('');
@@ -595,7 +595,7 @@ async function buildHtml(content, ctx, opts) {
     .join('');
 
   const tldrHtml = (
-    await Promise.all((content.tldr || []).map(async (t) => `<li>${await mdInline(t, md)}</li>`))
+    await Promise.all((content.tldr || []).map(async (line) => `<li>${await mdInline(line, md)}</li>`))
   ).join('');
 
   const typeLabel = TYPE_LABEL[content.targetType] || 'Explainer';
