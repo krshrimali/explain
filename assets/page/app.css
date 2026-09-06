@@ -1074,3 +1074,8 @@ body.threads-full.threads-open .shell { visibility: hidden; padding-right: 0; }
 .st--resolved { background: var(--surface-3); color: var(--text-3); }
 .thread--resolved { opacity: .72; }
 .thread--resolved .thread-num { background: var(--text-3); }
+
+/* difit thread cards are links into the diff viewer, not page anchors */
+.thread--difit .thread-head { cursor: pointer; }
+.thread--difit .thread-head:hover { background: var(--surface-2); }
+.thread--difit .thread-where { color: var(--purple); }

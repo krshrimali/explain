@@ -110,8 +110,19 @@ If the dot in the page toolbar is red, the server died - restart it with the sam
 threads. Answer what is in the inbox before stopping one, and prefer leaving a
 server running over restarting it mid-review.
 
-## Deep links
+## Deep links do not work - and why
 
-difit's per-file anchors are index-based and not derivable from a path, so the
-page links to the difit root rather than to a specific file. Always name the file
-and line in your prose (`cache.py:26`) so the reader can find it in difit's tree.
+The page cannot jump you to a specific line in difit. Two things block it,
+both verified against difit 5.0.12:
+
+- The id schemes disagree. A file section is `file-1`, `file-2`, ... (1-based,
+  assigned in render order), while line ids are `file-0-chunk-0-line-0-right`
+  (0-based). A link built from one scheme lands on the wrong file under the
+  other.
+- difit scrolls an inner `main.overflow-y-auto`, so the browser's native
+  fragment scrolling does nothing: loading `#file-3` leaves `scrollTop` at 0.
+
+So a difit thread in the page's threads drawer offers **Open in difit** (reusing
+one named tab) and **Copy path**, with `file:Lnn` shown on the card - rather than
+a link that silently lands somewhere wrong. Always name the file and line in
+your prose (`cache.py:26`) for the same reason.

@@ -693,6 +693,21 @@
     return map;
   }
 
+  function copyText(text, btn, restore) {
+    var done = function () {
+      if (!btn) return;
+      btn.textContent = T('copied', 'Copied');
+      setTimeout(function () { btn.textContent = restore; }, 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        toast(T('toastClipboardBlocked', 'Clipboard blocked by the browser'), 'err');
+      });
+    } else {
+      toast(T('toastClipboardBlocked', 'Clipboard blocked by the browser'), 'err');
+    }
+  }
+
   function statusLabel(kind) {
     if (kind === 'resolved') return T('stResolved', 'resolved');
     if (kind === 'answered') return T('stAnswered', 'answered');
@@ -796,20 +811,46 @@
       ? t.answered
       : (t.messages || []).some(function (m) { return (m.author || '').toLowerCase().indexOf('claude') !== -1; });
     var st = answered ? 'answered' : (t.sent ? 'pending' : 'saved');
-    return '<article class="thread thread--difit thread--' + st + '">' +
-      '<div class="thread-head"><span class="thread-num">' + (i + 1) + '</span>' +
-      '<span class="thread-where">' + escapeHtml(t.filePath || '') + ':L' + escapeHtml(String(line || '?')) + '</span>' +
-      '<span class="st st--' + st + '">' + escapeHtml(statusLabel(st)) + '</span></div>' +
+    var where = (t.filePath || '') + ':L' + String(line || '?');
+    // A difit comment is anchored to a diff line, not to anything on this page,
+    // so there is nothing here to locate - the action opens difit instead.
+    return '<article class="thread thread--difit thread--' + st + '" data-difit="1" data-path="' +
+        escapeHtml(where) + '">' +
+      '<div class="thread-head" data-act="open-difit" title="' + escapeHtml(T('openInDifit', 'Open in difit')) + '">' +
+        '<span class="thread-num">' + (i + 1) + '</span>' +
+        '<span class="thread-where">' + escapeHtml(where) + '</span>' +
+        '<span class="st st--' + st + '">' + escapeHtml(statusLabel(st)) + '</span></div>' +
       '<div class="thread-body">' +
       (t.codeSnapshot && t.codeSnapshot.content ? '<div class="th-quote">' + escapeHtml(t.codeSnapshot.content.slice(0, 300)) + '</div>' : '') +
-      msgs + '</div></article>';
+      msgs +
+      '<div class="thread-actions">' +
+        '<button class="btn btn--ghost btn--sm" data-act="open-difit">' + escapeHtml(T('openInDifit', 'Open in difit')) + '</button>' +
+        '<button class="th-mini" data-act="copy-path">' + escapeHtml(T('copyPath', 'Copy path')) + '</button>' +
+      '</div></div></article>';
   }
 
   $('#th-list').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-act]');
     if (!btn) return;
     var article = e.target.closest('.thread');
-    if (!article || !article.dataset.id) return;
+    if (!article) return;
+
+    // difit threads live in the diff viewer, not on this page.
+    if (article.dataset.difit) {
+      var where = article.dataset.path || '';
+      if (btn.dataset.act === 'copy-path') {
+        copyText(where, btn, T('copyPath', 'Copy path'));
+      } else {
+        var url = (state.difit && state.difit.url) || (CFG.difit && CFG.difit.url);
+        if (url) {
+          window.open(url, 'difit');
+          toast(T('difitNoAnchor', 'Opened difit - the file and line are on the card.'));
+        }
+      }
+      return;
+    }
+
+    if (!article.dataset.id) return;
     var id = article.dataset.id;
     var act = btn.dataset.act;
     if (act === 'focus' || act === 'locate') { focusThread(id); return; }
