@@ -11,12 +11,13 @@ import {
   ensureHub, HUB_ROOT, EVENTS_LOG, DEFAULT_PORT, pageExists, listPages,
   readMeta, writeMeta, readThreads, writeThreads, addMessage, appendEvent, readHubState,
   writeHubState, safeSlug, heartbeat, clearWatcher, readWatchers, watcherFor, pageOwner,
-  readConfig, writeConfig,
+  readConfig, writeConfig, resolveBind, isRemoteSession,
 } from './lib/store.mjs';
 import {
   buildInbox, formatInbox, buildPrompt, difitAlive, difitThreads, lineOf, isClaude,
 } from './lib/inbox.mjs';
 import { SUPPORTED_CHROME, hasChrome } from './lib/i18n.mjs';
+import { getApiKey, hasPassword, resetAuth, issueSetupToken, API_KEY_HEADER } from './lib/auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIFIT_BIN = path.join(HERE, 'node_modules', '.bin', 'difit');
@@ -56,30 +57,44 @@ function readInput(args, key) {
 
 /* ----------------------------------------------------------------- hub --- */
 
+function localHeaders(extra = {}) {
+  // Proves this request came from a process that can read auth.json (0600).
+  return { [API_KEY_HEADER]: getApiKey(), ...extra };
+}
+
 async function ping(port) {
   try {
-    const r = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1200) });
+    const r = await fetch(`http://localhost:${port}/api/health`, {
+      headers: localHeaders(),
+      signal: AbortSignal.timeout(1200),
+    });
     return r.ok ? await r.json() : null;
   } catch {
     return null;
   }
 }
 
-async function hubUp(preferred = DEFAULT_PORT) {
+async function hubUp(preferred = DEFAULT_PORT, bindMode = readConfig().bind || 'auto') {
   ensureHub();
   const known = readHubState().port;
   // Reuse a hub that is already listening, on the preferred port or the one we
   // last recorded (it may have fallen back when the preferred port was taken).
   for (const port of [...new Set([preferred, known].filter(Boolean))]) {
     const existing = await ping(port);
-    if (existing) return { port, url: `http://localhost:${port}`, pid: existing.pid, started: false };
+    if (existing) {
+      const st = readHubState();
+      return {
+        port, url: `http://localhost:${port}`, pid: existing.pid, started: false,
+        host: st.host, bind: st.bind, network: st.network, auth: st.auth, lan: st.lan,
+      };
+    }
   }
 
   const logFile = path.join(HUB_ROOT, 'hub.log');
   // Something unrelated may own the preferred port, so walk a small range.
   for (let port = preferred; port < preferred + 8; port++) {
     const out = fs.openSync(logFile, 'a');
-    const child = spawn(process.execPath, [path.join(HERE, 'hub.mjs'), String(port)], {
+    const child = spawn(process.execPath, [path.join(HERE, 'hub.mjs'), String(port), bindMode], {
       detached: true,
       stdio: ['ignore', out, out],
       cwd: HERE,
@@ -93,8 +108,12 @@ async function hubUp(preferred = DEFAULT_PORT) {
       await new Promise((r) => setTimeout(r, 120));
       const info = await ping(port);
       if (info) {
-        writeHubState({ ...readHubState(), port, pid: info.pid, startedAt: new Date().toISOString() });
-        return { port, url: `http://localhost:${port}`, pid: info.pid, started: true };
+        const st = readHubState();
+        return {
+          port, url: `http://localhost:${port}`, pid: info.pid, started: true,
+          host: st.host, bind: st.bind, network: st.network, auth: st.auth,
+          lan: st.lan, setupToken: st.setupToken,
+        };
       }
       if (dead) break; // port was taken; try the next one
     }
@@ -118,7 +137,7 @@ async function hubWrite(pathname, init) {
   try {
     const r = await fetch(`http://localhost:${port}${pathname}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      headers: localHeaders({ 'Content-Type': 'application/json', ...(init?.headers || {}) }),
       signal: AbortSignal.timeout(5000),
     });
     const body = await r.json().catch(() => ({}));
@@ -315,7 +334,8 @@ async function watch(args) {
 const USAGE = `explain <command> [options]
 
   up [--port N]                          start (or find) the hub server
-  config [--language L]                  show/set hub defaults (language: hinglish|english|hindi|<any>)
+  config [--language L] [--bind auto|local|network]   show/set hub defaults
+  auth status | auth reset               password gate for network-bound hubs
   status [--slug S]                      hub + pages + difit health
   list                                   list explainer pages
   render --slug S --content <file> [--language L] [--session ID]  render/refresh a page
@@ -355,6 +375,16 @@ async function main() {
       return say({ pages: listPages() });
 
     case 'config': {
+      if (args.bind) {
+        const bind = String(args.bind).toLowerCase().trim();
+        if (!['auto', 'local', 'network'].includes(bind)) die('--bind must be auto, local or network');
+        writeConfig({ bind });
+        return say({
+          ...readConfig(),
+          resolved: resolveBind(bind),
+          note: 'Restart the hub for this to take effect: kill it, then `explain up`.',
+        });
+      }
       if (args.language) {
         const language = String(args.language).toLowerCase().trim();
         const next = writeConfig({ language });
@@ -367,7 +397,27 @@ async function main() {
           supportedChrome: SUPPORTED_CHROME,
         });
       }
-      return say({ ...readConfig(), supportedChrome: SUPPORTED_CHROME });
+      return say({
+        ...readConfig(),
+        remoteSession: isRemoteSession(),
+        resolved: resolveBind(),
+        supportedChrome: SUPPORTED_CHROME,
+      });
+    }
+
+    case 'auth': {
+      const sub = args._[0] || 'status';
+      if (sub === 'reset') {
+        resetAuth();
+        return say({ ok: true, note: 'Password cleared. Restart the hub, then sign up again.' });
+      }
+      const bind = resolveBind();
+      return say({
+        required: bind.network,
+        passwordSet: hasPassword(),
+        bind,
+        setupToken: bind.network && !hasPassword() ? issueSetupToken() : undefined,
+      });
     }
 
     case 'status': {

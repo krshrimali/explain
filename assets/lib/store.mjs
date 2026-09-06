@@ -245,7 +245,27 @@ export function writeHubState(state) {
 // Hub-wide defaults. `language` steers both the page chrome and the language
 // Claude writes the explanation in; a page may override it in content.json.
 export function readConfig() {
-  return { language: 'hinglish', ...readJson(CONFIG_FILE, {}) };
+  return { language: 'hinglish', bind: 'auto', ...readJson(CONFIG_FILE, {}) };
+}
+
+/**
+ * Is this shell a remote session? If so the hub is useless on loopback - the
+ * browser is on another machine - so `bind: 'auto'` opens it to the network,
+ * which in turn makes auth mandatory.
+ */
+export function isRemoteSession() {
+  return Boolean(
+    process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY
+  );
+}
+
+/** -> { host, network } where `network` means "reachable beyond loopback". */
+export function resolveBind(configured) {
+  const mode = configured || readConfig().bind || 'auto';
+  if (mode === 'local') return { host: '127.0.0.1', network: false, mode };
+  if (mode === 'network' || mode === '0.0.0.0') return { host: '0.0.0.0', network: true, mode: 'network' };
+  const remote = isRemoteSession();
+  return { host: remote ? '0.0.0.0' : '127.0.0.1', network: remote, mode: 'auto' };
 }
 
 export function writeConfig(patch) {

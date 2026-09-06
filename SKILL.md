@@ -250,6 +250,14 @@ server starts itself whenever it is needed - port 7788, or the next free port if
 that one is taken, so read the URL that `render` / `open` prints rather than
 assuming 7788. The hub root URL is an index of every explainer.
 
+**Remote sessions.** Over SSH the hub binds `0.0.0.0` automatically, and then a
+password is mandatory - the first page load is a signup screen that wants the
+setup code `explain up` printed. Surface that code and the LAN URL to the user;
+do not try to work around the gate. `explain auth` reports the state, and
+`explain config --bind local` keeps it on loopback if they would rather tunnel
+(`ssh -L 7788:localhost:7788`). Your own CLI keeps working either way - it
+authenticates with a key in `auth.json`.
+
 ## Rules
 
 - **Never fabricate.** If you did not read a file, do not describe its contents.

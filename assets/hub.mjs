@@ -2,15 +2,22 @@
 // Serves the rendered pages, owns the comment-thread API, streams live updates
 // over SSE, and appends an event line that Claude's Monitor tails.
 import http from 'node:http';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ensureHub, pageDir, listPages, pageExists, readMeta, readThreads, writeThreads,
   createThread, addMessage, deleteThread, appendEvent, readHubState, writeHubState,
-  safeSlug, DEFAULT_PORT, PAGES_DIR, readWatchers, pageOwner,
+  safeSlug, DEFAULT_PORT, PAGES_DIR, readWatchers, pageOwner, resolveBind,
 } from './lib/store.mjs';
 import { buildInbox, buildPrompt } from './lib/inbox.mjs';
+import {
+  hasPassword, setPassword, checkPassword, createSession, validSession, destroySession,
+  parseCookies, sessionCookie, clearCookie, cookieName, signupPage, loginPage,
+  issueSetupToken, checkSetupToken, throttled, noteFailure, noteSuccess,
+  checkApiKey, API_KEY_HEADER,
+} from './lib/auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = path.join(HERE, 'page');
@@ -185,11 +192,127 @@ try{localStorage.setItem('explain-theme',next==='auto'?'':next);}catch(e){}});</
 </body></html>`;
 }
 
+/* ---------------------------------------------------------------- auth ---- */
+
+// Set once at listen() time. When false (loopback only) every gate below is a
+// no-op, so the local workflow is unchanged.
+let AUTH_REQUIRED = false;
+
+function clientIp(req) {
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function readForm(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c) => {
+      data += c;
+      if (data.length > 64 * 1024) {
+        reject(new Error('Body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(data))));
+    req.on('error', reject);
+  });
+}
+
+function authed(req) {
+  if (!AUTH_REQUIRED) return true;
+  // Local tooling presents a key only the file's owner can read.
+  if (checkApiKey(req.headers[API_KEY_HEADER])) return true;
+  return validSession(parseCookies(req.headers.cookie)[cookieName()]);
+}
+
+function htmlPage(res, status, body, headers = {}) {
+  send(res, status, body, { 'Content-Type': MIME['.html'], ...headers });
+}
+
+/** Returns true when it has fully handled the request. */
+async function handleAuthRoutes(req, res, pathname) {
+  if (!AUTH_REQUIRED) {
+    // Nothing to sign into on a loopback hub.
+    if (pathname === '/login' || pathname === '/signup') {
+      res.writeHead(302, { Location: '/' });
+      return res.end(), true;
+    }
+    return false;
+  }
+
+  const ip = clientIp(req);
+  const needSignup = !hasPassword();
+
+  if (pathname === '/signup') {
+    if (needSignup && req.method === 'GET') {
+      return htmlPage(res, 200, signupPage({ needsToken: true })), true;
+    }
+    if (needSignup && req.method === 'POST') {
+      const form = await readForm(req).catch(() => ({}));
+      if (!checkSetupToken(form.token)) {
+        noteFailure(ip);
+        return htmlPage(res, 400, signupPage({ needsToken: true, error: 'That setup code is not right.' })), true;
+      }
+      if (String(form.password || '').length < 8) {
+        return htmlPage(res, 400, signupPage({ needsToken: true, error: 'Use at least 8 characters.' })), true;
+      }
+      if (form.password !== form.confirm) {
+        return htmlPage(res, 400, signupPage({ needsToken: true, error: 'The two passwords do not match.' })), true;
+      }
+      setPassword(form.password);
+      const token = createSession();
+      noteSuccess(ip);
+      res.writeHead(302, { Location: '/', 'Set-Cookie': sessionCookie(token) });
+      return res.end(), true;
+    }
+    res.writeHead(302, { Location: '/login' });
+    return res.end(), true;
+  }
+
+  if (pathname === '/login') {
+    if (needSignup) {
+      res.writeHead(302, { Location: '/signup' });
+      return res.end(), true;
+    }
+    if (req.method === 'GET') return htmlPage(res, 200, loginPage()), true;
+    if (req.method === 'POST') {
+      const wait = throttled(ip);
+      if (wait) {
+        return htmlPage(res, 429, loginPage({ error: `Too many attempts. Try again in ${wait}s.` })), true;
+      }
+      const form = await readForm(req).catch(() => ({}));
+      if (!checkPassword(form.password)) {
+        noteFailure(ip);
+        return htmlPage(res, 401, loginPage({ error: 'Wrong password.' })), true;
+      }
+      noteSuccess(ip);
+      const token = createSession();
+      res.writeHead(302, { Location: '/', 'Set-Cookie': sessionCookie(token) });
+      return res.end(), true;
+    }
+  }
+
+  if (pathname === '/logout') {
+    destroySession(parseCookies(req.headers.cookie)[cookieName()]);
+    res.writeHead(302, { Location: '/login', 'Set-Cookie': clearCookie() });
+    return res.end(), true;
+  }
+
+  if (!authed(req)) {
+    // Everything else - pages, static assets, API, SSE - is behind the gate.
+    if (pathname.startsWith('/api/')) return json(res, 401, { error: 'Not authenticated' }), true;
+    res.writeHead(302, { Location: needSignup ? '/signup' : '/login' });
+    return res.end(), true;
+  }
+  return false;
+}
+
 /* -------------------------------------------------------------- routes ---- */
 
 async function handle(req, res, base) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
+
+  if (await handleAuthRoutes(req, res, p)) return;
 
   if (p === '/api/health') {
     return json(res, 200, { ok: true, pid: process.pid, pages: listPages().length });
@@ -374,8 +497,12 @@ async function handle(req, res, base) {
 
 /* --------------------------------------------------------------- start ---- */
 
-export function start(port = DEFAULT_PORT) {
+export function start(port = DEFAULT_PORT, bindMode) {
   ensureHub();
+  const bind = resolveBind(bindMode);
+  // Reachable beyond loopback => a password is not optional.
+  AUTH_REQUIRED = bind.network;
+
   const server = http.createServer((req, res) => {
     handle(req, res, '').catch((err) => {
       try {
@@ -393,17 +520,33 @@ export function start(port = DEFAULT_PORT) {
     throw err;
   });
   return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, bind.host, () => {
       watchAll();
-      writeHubState({ ...readHubState(), port, pid: process.pid, startedAt: new Date().toISOString() });
-      resolve({ port, url: `http://localhost:${port}`, pid: process.pid });
+      const info = {
+        port,
+        host: bind.host,
+        bind: bind.mode,
+        network: bind.network,
+        auth: AUTH_REQUIRED,
+        url: `http://localhost:${port}`,
+        pid: process.pid,
+      };
+      if (bind.network) {
+        info.lan = `http://${os.hostname()}:${port}`;
+        // Only meaningful until a password exists; it is what stops a stranger
+        // on the network claiming the hub before you do.
+        const t = issueSetupToken();
+        if (t) info.setupToken = t;
+      }
+      writeHubState({ ...readHubState(), ...info, startedAt: new Date().toISOString() });
+      resolve(info);
     });
   });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.argv[2]) || DEFAULT_PORT;
-  start(port).then((info) => {
+  start(port, process.argv[3]).then((info) => {
     console.log(JSON.stringify(info));
   });
 }
