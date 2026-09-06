@@ -167,6 +167,11 @@ A saved comment is **not** pending. Writing one leaves it `saved` (local only) -
 the user can copy its prompt without ever sending it. Only **Send to Claude**
 flips `saved -> pending` and notifies the owning session.
 
+**This includes difit.** A line comment left in difit does not wake you either;
+it waits for the same Send press, whose count covers page drafts plus unsent
+difit threads. `explain difit submit --slug X` does it from the terminal. So do
+not go looking for difit comments to answer - wait to be told.
+
 On submit the page POSTs to the hub, a `SUBMIT` line lands in `events.log`, and
 a dialog opens showing either:
 

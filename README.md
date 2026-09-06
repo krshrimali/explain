@@ -29,6 +29,10 @@ worth very little. This gives you both halves:
 Press <kbd>C</kbd>, drag a box around whatever is wrong or unclear, type your
 question, hit **Send to Claude**. The answer appears in place — no reload.
 
+Comments batch up until you send them. That applies to difit too: a line comment
+sits as `saved` and does not interrupt Claude, and the Send button's count is
+page comments plus unsent difit threads, so one press releases the lot.
+
 If Claude fixed the page rather than just replying, the page updates itself and
 any comment anchored to changed content is flagged `stale`, so a thread never
 silently disagrees with the text above it.

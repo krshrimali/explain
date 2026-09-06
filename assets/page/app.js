@@ -717,7 +717,9 @@
       var dt = state.difit.threads || [];
       html += '<a class="th-difit-link" href="' + escapeHtml(state.difit.url || '#') + '" target="_blank" rel="noopener">' +
         '<b>difit</b> — ' + (state.difit.alive
-          ? dt.length + ' ' + escapeHtml(dt.length === 1 ? T('codeThread', 'code thread') : T('codeThreads', 'code threads')) + ' · ' + escapeHtml(T('difitServerLive', 'server live'))
+          ? dt.length + ' ' + escapeHtml(dt.length === 1 ? T('codeThread', 'code thread') : T('codeThreads', 'code threads')) +
+            (state.difit.unsent ? ' · ' + state.difit.unsent + ' ' + escapeHtml(T('stSaved', 'saved')) : '') +
+            ' · ' + escapeHtml(T('difitServerLive', 'server live'))
           : escapeHtml(T('difitServerDown', 'server is down'))) +
         '</a>';
       if (state.filter === 'difit') {
@@ -735,8 +737,10 @@
 
     list.innerHTML = html;
 
-    var pending = state.threads.filter(function (t) { return t.status === 'draft'; }).length;
-    var pendingSent = state.threads.filter(function (t) { return t.status === 'pending'; }).length;
+    // difit has no send button of its own, so its unsent comments are counted
+    // here and go out with the same Send press.
+    var unsentDifit = state.difit.unsent || 0;
+    var pending = state.threads.filter(function (t) { return t.status === 'draft'; }).length + unsentDifit;
     $('#pending-count').textContent = String(pending);
     $('#btn-submit').disabled = pending === 0;
     $('#th-submit').disabled = pending === 0;
@@ -788,11 +792,14 @@
         '<span>' + escapeHtml(timeAgo(m.createdAt)) + '</span></div>' +
         '<div class="msg-body">' + mdLite(m.body) + '</div></div>';
     }).join('');
-    var answered = (t.messages || []).some(function (m) { return (m.author || '').toLowerCase().indexOf('claude') !== -1; });
-    return '<article class="thread thread--difit">' +
+    var answered = t.answered != null
+      ? t.answered
+      : (t.messages || []).some(function (m) { return (m.author || '').toLowerCase().indexOf('claude') !== -1; });
+    var st = answered ? 'answered' : (t.sent ? 'pending' : 'saved');
+    return '<article class="thread thread--difit thread--' + st + '">' +
       '<div class="thread-head"><span class="thread-num">' + (i + 1) + '</span>' +
       '<span class="thread-where">' + escapeHtml(t.filePath || '') + ':L' + escapeHtml(String(line || '?')) + '</span>' +
-      '<span class="st st--' + (answered ? 'answered' : 'pending') + '">' + (answered ? 'answered' : 'pending') + '</span></div>' +
+      '<span class="st st--' + st + '">' + escapeHtml(statusLabel(st)) + '</span></div>' +
       '<div class="thread-body">' +
       (t.codeSnapshot && t.codeSnapshot.content ? '<div class="th-quote">' + escapeHtml(t.codeSnapshot.content.slice(0, 300)) + '</div>' : '') +
       msgs + '</div></article>';
@@ -838,14 +845,15 @@
   /* ------------------------------------------------------------- submit -- */
 
   function submit() {
-    var n = state.threads.filter(function (t) { return t.status === 'draft'; }).length;
+    var n = state.threads.filter(function (t) { return t.status === 'draft'; }).length +
+      (state.difit.unsent || 0);
     if (!n) return;
     $('#btn-submit').disabled = true;
     api('/submit', { method: 'POST' })
       .then(function (res) {
         openThreads(true);
         openSentModal(res);
-        return refreshThreads();
+        return Promise.all([refreshThreads(), refreshDifit()]);
       })
       .catch(function (err) { toast(T('toastSubmitFailed', 'Submit failed: ') + err.message, 'err'); $('#btn-submit').disabled = false; });
   }

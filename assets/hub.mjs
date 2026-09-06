@@ -10,6 +10,7 @@ import {
   ensureHub, pageDir, listPages, pageExists, readMeta, readThreads, writeThreads,
   createThread, addMessage, deleteThread, appendEvent, readHubState, writeHubState,
   safeSlug, DEFAULT_PORT, PAGES_DIR, readWatchers, pageOwner, resolveBind,
+  readDifitSubmitted, submitDifitThreads, difitKey,
 } from './lib/store.mjs';
 import { buildInbox, buildPrompt } from './lib/inbox.mjs';
 import {
@@ -137,17 +138,28 @@ function serveFile(res, file, { download = false } = {}) {
   fs.createReadStream(file).pipe(res);
 }
 
-async function difitStatus(meta) {
+async function difitStatus(meta, slug) {
   const port = meta?.difit?.port;
-  if (!port) return { configured: false, alive: false, threads: [] };
+  if (!port) return { configured: false, alive: false, threads: [], unsent: 0 };
   try {
-    const ctrl = AbortSignal.timeout(2500);
-    const r = await fetch(`http://localhost:${port}/api/comments-json`, { signal: ctrl });
-    if (!r.ok) return { configured: true, alive: false, threads: [], port };
+    const r = await fetch(`http://localhost:${port}/api/comments-json`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!r.ok) return { configured: true, alive: false, threads: [], unsent: 0, port };
     const data = await r.json();
-    return { configured: true, alive: true, port, url: meta.difit.url, threads: data.threads || [] };
+    const submitted = readDifitSubmitted(slug);
+    const threads = (data.threads || []).map((t) => {
+      const msgs = t.messages || [];
+      const last = msgs[msgs.length - 1];
+      const answered = Boolean(last && String(last.author || '').toLowerCase().includes('claude'));
+      return { ...t, answered, sent: answered || submitted.has(difitKey(t)) };
+    });
+    return {
+      configured: true, alive: true, port, url: meta.difit.url, threads,
+      unsent: threads.filter((t) => !t.sent).length,
+    };
   } catch {
-    return { configured: true, alive: false, threads: [], port, url: meta?.difit?.url };
+    return { configured: true, alive: false, threads: [], unsent: 0, port, url: meta?.difit?.url };
   }
 }
 
@@ -445,15 +457,30 @@ async function handle(req, res, base) {
       const pending = data.threads.filter((t) => t.status === 'pending');
       writeThreads(slug, data);
       broadcast(slug, 'threads', data);
+
+      // difit has no send button of its own, so the page's Send covers it too.
+      const meta = readMeta(slug);
+      let difitSent = 0;
+      if (meta.difit?.port) {
+        const status = await difitStatus(meta, slug);
+        difitSent = submitDifitThreads(
+          slug,
+          status.threads.filter((t) => !t.sent).map((t) => difitKey(t))
+        ).length;
+      }
+
       appendEvent('SUBMIT', slug, {
-        count: pending.length,
-        new: flipped.length,
-        title: readMeta(slug).title || slug,
+        count: pending.length + difitSent,
+        new: flipped.length + difitSent,
+        difit: difitSent,
+        title: meta.title || slug,
       });
       const inbox = await buildInbox(slug, { includeDrafts: true });
       return json(res, 200, {
         ok: true,
-        submitted: flipped.length,
+        submitted: flipped.length + difitSent,
+        submittedPage: flipped.length,
+        submittedDifit: difitSent,
         pending: pending.length,
         watcher: pageOwner(slug),
         prompt: buildPrompt(inbox, { slug }),
@@ -461,7 +488,7 @@ async function handle(req, res, base) {
     }
 
     if (rest === '/difit') {
-      return json(res, 200, await difitStatus(readMeta(slug)));
+      return json(res, 200, await difitStatus(readMeta(slug), slug));
     }
 
     if (rest === '/content') {

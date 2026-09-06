@@ -1,7 +1,7 @@
 // inbox.mjs - the pending-comment view, shared by the CLI and the hub server.
 // The hub needs it so the page can show a paste-ready prompt; the CLI needs it
 // so Claude can read and answer. One implementation, two consumers.
-import { listPages, readMeta, readThreads } from './store.mjs';
+import { listPages, readMeta, readThreads, readDifitSubmitted, difitKey } from './store.mjs';
 
 const SKILL_CLI = '~/.claude/skills/explain/assets/explain';
 
@@ -74,12 +74,17 @@ export async function buildInbox(slugFilter, { includeDrafts = false } = {}) {
 
     const port = meta.difit?.port;
     if (port && (await difitAlive(port))) {
+      const submitted = readDifitSubmitted(p.slug);
       for (const t of await difitThreads(port)) {
         const msgs = t.messages || [];
         const last = msgs[msgs.length - 1];
         if (!last || isClaude(last.author)) continue; // already answered
+        // Not sent yet: same gate as a page comment sitting as a draft.
+        const isDraft = !submitted.has(difitKey(t));
+        if (isDraft && !includeDrafts) continue;
         inbox.push({
           source: 'difit',
+          draft: isDraft,
           slug: p.slug,
           pageTitle: p.title,
           difitPort: port,

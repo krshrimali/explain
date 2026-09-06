@@ -208,6 +208,43 @@ export function deleteThread(slug, threadId) {
   });
 }
 
+/* -------------------------------------------------- difit submissions -- */
+
+// difit is a separate tool with no "send" button of its own, so the gate lives
+// here: a difit thread is only handed to Claude once the user has submitted it,
+// exactly like a page comment sitting as a draft until Send to Claude.
+//
+// Keyed by thread id + message count, so adding another message to an already
+// submitted thread makes it un-submitted again - which is what you want, since
+// that new message has not been sent.
+export function difitKey(thread) {
+  return `${thread.id}:${(thread.messages || []).length}`;
+}
+
+function difitFile(slug) {
+  return path.join(pageDir(slug), 'difit-submitted.json');
+}
+
+export function readDifitSubmitted(slug) {
+  const data = readJson(difitFile(slug), null);
+  return new Set(Array.isArray(data?.keys) ? data.keys : []);
+}
+
+export function submitDifitThreads(slug, keys) {
+  const set = readDifitSubmitted(slug);
+  const added = [];
+  for (const k of keys) {
+    if (!set.has(k)) {
+      set.add(k);
+      added.push(k);
+    }
+  }
+  // Bounded: a long review would otherwise grow this file forever.
+  const all = [...set].slice(-500);
+  writeJson(difitFile(slug), { version: 1, keys: all, updatedAt: new Date().toISOString() });
+  return added;
+}
+
 /* --------------------------------------------------------------- events -- */
 
 const EVENTS_MAX_BYTES = 1024 * 1024;

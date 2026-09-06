@@ -11,7 +11,7 @@ import {
   ensureHub, HUB_ROOT, EVENTS_LOG, DEFAULT_PORT, pageExists, listPages,
   readMeta, writeMeta, readThreads, writeThreads, addMessage, appendEvent, readHubState,
   writeHubState, safeSlug, heartbeat, clearWatcher, readWatchers, watcherFor, pageOwner,
-  readConfig, writeConfig, resolveBind, isRemoteSession,
+  readConfig, writeConfig, resolveBind, isRemoteSession, readDifitSubmitted, submitDifitThreads, difitKey,
 } from './lib/store.mjs';
 import {
   buildInbox, formatInbox, buildPrompt, difitAlive, difitThreads, lineOf, isClaude,
@@ -308,10 +308,13 @@ async function watch(args) {
       try {
         threads = await difitThreads(port);
       } catch { continue; }
+      const submitted = readDifitSubmitted(p.slug);
       for (const t of threads) {
         const msgs = t.messages || [];
         const last = msgs[msgs.length - 1];
         if (!last || isClaude(last.author)) continue;
+        // Wait for the user to press Send; a difit comment is not a summons.
+        if (!submitted.has(difitKey(t))) continue;
         const key = `${p.slug}:${t.id}:${msgs.length}`;
         if (seenDifit.has(key)) continue;
         seenDifit.add(key);
@@ -346,6 +349,7 @@ const USAGE = `explain <command> [options]
   difit start --slug S [--repo D] [--target REV] [--base REV] [--pr URL] [--port N]
   difit stop --slug S
   difit threads --slug S
+  difit submit --slug S                  send this page's difit comments to Claude
 
   inbox [--slug S] [--json] [--include-drafts]   pending comments (page + difit)
   prompt [--slug S]                      paste-ready prompt for another Claude session
@@ -500,6 +504,19 @@ async function main() {
         } catch { /* already gone */ }
         writeMeta(slug, { ...meta, difit: null });
         return say({ ok: true, stopped: meta.difit.port });
+      }
+      if (sub === 'submit') {
+        if (!meta.difit?.port) die('no difit server for this page');
+        const threads = await difitThreads(meta.difit.port);
+        const pendingKeys = threads
+          .filter((t) => {
+            const last = (t.messages || [])[t.messages.length - 1];
+            return last && !isClaude(last.author);
+          })
+          .map((t) => difitKey(t));
+        const added = submitDifitThreads(slug, pendingKeys);
+        if (added.length) appendEvent('SUBMIT', slug, { count: added.length, source: 'difit', title: meta.title || slug });
+        return say({ ok: true, submitted: added.length, alreadySent: pendingKeys.length - added.length });
       }
       if (sub === 'threads') {
         if (!meta.difit?.port) return say({ threads: [] });

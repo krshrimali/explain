@@ -39,6 +39,25 @@ when you intend to review properly; you cannot judge a diff without its context.
 One server per page. Starting again for a slug whose server is still alive reuses
 it (`"reused": true`).
 
+## Comments wait to be sent
+
+difit has no Send button of its own, so the gate lives in the hub: a difit
+thread is handed to you only after the user submits it, exactly like a page
+comment sitting as a draft. Leaving a line comment in difit does **not** wake
+you.
+
+The explainer page's **Send to Claude** covers both - its count is page drafts
+plus unsent difit threads, and one press releases everything. From the terminal:
+
+```bash
+$EX difit submit --slug X     # release this page's difit comments
+```
+
+Submission is keyed by thread id + message count, so adding another message to
+an already-sent thread makes it unsent again - that new message still has to be
+sent. Your replies do not re-open anything, since an answered thread is filtered
+out first.
+
 ## Reading comments
 
 ```bash
@@ -46,7 +65,9 @@ $EX inbox                  # both systems, only threads awaiting Claude
 $EX difit threads --slug X # raw difit threads, answered ones included
 ```
 
-A difit thread is "pending" when its last message is not from `claude`.
+A difit thread is pending when its last message is not from `claude` **and** the
+user has submitted it. `inbox` shows only submitted ones; `prompt` includes the
+unsent ones too, so they can be copied without being sent.
 
 ## Writing comments
 
