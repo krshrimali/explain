@@ -598,10 +598,17 @@
   var FULL_KEY = 'explain-threads-full';
 
   function setThreadsFull(full) {
+    // Full screen without an open panel shows nothing at all, so the two always
+    // move together.
+    if (full) document.body.classList.add('threads-open');
     document.body.classList.toggle('threads-full', full);
     var btn = $('#th-expand');
     if (btn) btn.title = full ? T('collapse', 'Exit full screen') : T('expand', 'Full screen');
-    try { localStorage.setItem(FULL_KEY, full ? '1' : ''); } catch (e) {}
+    // Per-tab, not per-origin: this is a transient view mode. Persisting it in
+    // localStorage meant one toggle made every explainer open full screen in
+    // every future tab. sessionStorage still survives the reload Claude
+    // triggers after re-rendering, which is the case worth keeping.
+    try { sessionStorage.setItem(FULL_KEY, full ? '1' : ''); } catch (e) {}
     scheduleRedraw();
   }
 
@@ -620,7 +627,9 @@
   });
   $('#th-expand').addEventListener('click', function () { setThreadsFull(!threadsFull()); });
   try {
-    if (localStorage.getItem(FULL_KEY)) setThreadsFull(true);
+    // Anyone left stuck full-screen by the old per-origin flag gets unstuck.
+    localStorage.removeItem(FULL_KEY);
+    if (sessionStorage.getItem(FULL_KEY)) setThreadsFull(true);
   } catch (e) {}
   $('#th-refresh').addEventListener('click', function () { refreshThreads(); refreshDifit(); });
 

@@ -1051,8 +1051,11 @@ body.threads-full .th-quote { max-height: 160px; }
 body.threads-full .marker-layer,
 body.threads-full .progress { display: none; }
 /* The page behind is inert while full screen is up. */
-body.threads-full .shell { visibility: hidden; }
-body.threads-full.threads-open .shell { padding-right: 0; }
+/* Both classes required. Hiding the article on `threads-full` alone left a
+   blank page whenever the panel was closed - full screen persisted across
+   loads but "panel open" did not, so a fresh load hid the article AND kept the
+   panel translated off-screen. */
+body.threads-full.threads-open .shell { visibility: hidden; padding-right: 0; }
 
 @media (max-width: 700px) {
   body.threads-full .th-tabs,
