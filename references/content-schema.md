@@ -173,6 +173,23 @@ Include at most one `praise`. A review that is mostly praise is not a review.
 
 ---
 
+## Raw HTML is escaped
+
+Markdown in any field renders as markdown; **raw HTML is escaped, not emitted**.
+`<img>`, `<div>`, `<script>` and friends show up as literal text.
+
+That is deliberate: these pages quote untrusted material - GitHub issue bodies,
+PR descriptions, discussion comments - and the page can reach the hub API on
+localhost. An `<img onerror=...>` inside a quoted issue would otherwise run with
+access to every page's threads.
+
+Consequences for authoring:
+
+- Never reach for raw HTML to style something; use the block types instead.
+- Quoting an issue or PR body verbatim is safe - paste it as-is.
+- Link and image URLs are limited to `http(s):`, `mailto:`, and page-relative
+  targets; a `javascript:` URL is dropped.
+
 ## Language support
 
 Shiki highlights any bundled language. Common aliases are normalized (`js`, `ts`,

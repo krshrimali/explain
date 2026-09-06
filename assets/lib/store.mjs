@@ -57,6 +57,9 @@ export function listPages() {
   return fs
     .readdirSync(PAGES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
+    // A render that failed part-way leaves a directory with no meta.json; such
+    // a page cannot be served, so it should not appear in listings either.
+    .filter((d) => fs.existsSync(path.join(PAGES_DIR, d.name, 'meta.json')))
     .map((d) => {
       const meta = readMeta(d.name);
       const threads = readThreads(d.name);
@@ -207,9 +210,21 @@ export function deleteThread(slug, threadId) {
 
 /* --------------------------------------------------------------- events -- */
 
+const EVENTS_MAX_BYTES = 1024 * 1024;
+
 export function appendEvent(type, slug, detail = {}) {
   ensureHub();
   const line = JSON.stringify({ ts: new Date().toISOString(), type, slug, ...detail });
+  try {
+    // Rotate rather than truncate in place: watchers track a byte offset, and
+    // a shorter file makes them reset to the new end instead of replaying.
+    if (fs.statSync(EVENTS_LOG).size > EVENTS_MAX_BYTES) {
+      fs.renameSync(EVENTS_LOG, `${EVENTS_LOG}.1`);
+      fs.writeFileSync(EVENTS_LOG, '');
+    }
+  } catch {
+    /* no log yet, or rotation raced another process - appending still works */
+  }
   fs.appendFileSync(EVENTS_LOG, line + '\n');
   return line;
 }
@@ -283,10 +298,22 @@ export function readWatchers() {
   } catch {
     return [];
   }
-  return files
-    .map((f) => readJson(path.join(WATCHERS_DIR, f), null))
-    .filter((w) => w && isLive(w))
-    .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  const live = [];
+  for (const f of files) {
+    const full = path.join(WATCHERS_DIR, f);
+    const w = readJson(full, null);
+    if (w && isLive(w)) {
+      live.push(w);
+    } else {
+      // The session is gone; drop its heartbeat so the directory stays small.
+      try {
+        fs.rmSync(full, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+  return live.sort((a, b) => String(b.at).localeCompare(String(a.at)));
 }
 
 /** Is this specific session listening? */

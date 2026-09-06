@@ -550,8 +550,9 @@
 
   function drawMarkers() {
     markerLayer.innerHTML = '';
+    var nums = threadNumbers();
     var visible = state.threads.filter(function (t) { return t.anchor && t.status !== 'resolved'; });
-    visible.forEach(function (t, i) {
+    visible.forEach(function (t) {
       var box = resolveAnchor(t.anchor);
       var stale = !box || anchorChanged(t.anchor);
       if (!box) return;
@@ -569,7 +570,7 @@
       });
       var pin = document.createElement('div');
       pin.className = 'marker-pin';
-      pin.textContent = String(i + 1);
+      pin.textContent = String(nums[t.id] || '?');
       pin.title = (t.messages[0] && t.messages[0].body || '').slice(0, 140);
       el.appendChild(pin);
       el.addEventListener('click', function (ev) {
@@ -635,6 +636,14 @@
   function focusThread(id) {
     state.activeId = id;
     openThreads(true);
+    // If the active tab filters this thread out, clicking its marker would look
+    // like nothing happened. Fall back to All so the card is actually there.
+    if (!threadPassesFilter(id)) {
+      state.filter = 'all';
+      $$('.th-tab').forEach(function (tab) {
+        tab.classList.toggle('is-active', tab.dataset.filter === 'all');
+      });
+    }
     renderThreads();
     var node = $('.thread[data-id="' + CSS.escape(id) + '"]');
     if (node) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -648,13 +657,35 @@
   }
 
   // draft = saved locally, never sent. pending = actually sent to Claude.
+  function threadPassesFilter(id) {
+    var th = state.threads.find(function (x) { return x.id === id; });
+    if (!th) return false;
+    var f = state.filter;
+    if (f === 'all') return true;
+    if (f === 'saved') return th.status === 'draft';
+    if (f === 'pending') return th.status === 'pending';
+    if (f === 'answered') return th.status === 'answered';
+    return false;
+  }
+
   function statusOf(th) {
+    if (th.status === 'resolved') return 'resolved';
     if (th.status === 'answered') return 'answered';
     if (th.status === 'draft') return 'saved';
     return 'pending';
   }
 
+  // One number per thread, taken from its position in the full list. Markers and
+  // cards both read this, so marker 3 always opens card 3 - previously each
+  // numbered its own filtered subset and they drifted apart.
+  function threadNumbers() {
+    var map = {};
+    state.threads.forEach(function (th, i) { map[th.id] = i + 1; });
+    return map;
+  }
+
   function statusLabel(kind) {
+    if (kind === 'resolved') return T('stResolved', 'resolved');
     if (kind === 'answered') return T('stAnswered', 'answered');
     if (kind === 'saved') return T('stSaved', 'saved');
     return T('stPending', 'sent');
@@ -662,6 +693,7 @@
 
   function renderThreads() {
     var list = $('#th-list');
+    var nums = threadNumbers();
     var items = state.threads.slice();
     var showDifit = state.filter === 'difit' || state.filter === 'all';
 
@@ -688,7 +720,7 @@
 
     if (state.filter !== 'difit') {
       html += items.length
-        ? items.map(function (t, i) { return threadHtml(t, i); }).join('')
+        ? items.map(function (t) { return threadHtml(t, (nums[t.id] || 0) - 1); }).join('')
         : '<div class="th-empty"><b>' + escapeHtml(T('emptyTitle', 'No threads yet')) + '</b>' + escapeHtml(T('emptyBody', 'Press C and drag a box.')) + '</div>';
     }
 

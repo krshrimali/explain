@@ -102,6 +102,34 @@ async function hubUp(preferred = DEFAULT_PORT) {
   die(`hub did not come up on ports ${preferred}-${preferred + 7}; see ${logFile}`);
 }
 
+/**
+ * Mutations go through the hub whenever it is running.
+ *
+ * The hub and this CLI are separate processes, and both used to do a
+ * read-modify-write on threads.json. A comment the user wrote while Claude was
+ * replying got silently dropped by whichever process wrote last. Routing
+ * through the HTTP API makes the hub the single writer; the direct-write
+ * fallback is only reachable when the hub is down, where there is no second
+ * writer to race with.
+ */
+async function hubWrite(pathname, init) {
+  const port = readHubState().port || DEFAULT_PORT;
+  if (!(await ping(port))) return null;
+  try {
+    const r = await fetch(`http://localhost:${port}${pathname}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `hub returned ${r.status}`);
+    return body;
+  } catch (e) {
+    if (e?.name === 'TimeoutError') return null; // fall back to a direct write
+    throw e;
+  }
+}
+
 /* --------------------------------------------------------------- difit --- */
 
 function difitRun(argv, cwd) {
@@ -463,23 +491,40 @@ async function main() {
       const thread = args.thread || die('--thread required');
       const body = readInput(args, 'body') || die('--body required');
       if (!pageExists(slug)) die(`no such page: ${slug}`);
+
+      const viaHub = await hubWrite(
+        `/api/p/${encodeURIComponent(slug)}/threads/${encodeURIComponent(thread)}/messages`,
+        { method: 'POST', body: JSON.stringify({ role: 'claude', body }) }
+      );
+      if (viaHub?.thread) {
+        appendEvent('CLAUDE_REPLY', slug, { threadId: thread });
+        return say({
+          ok: true, via: 'hub', threadId: viaHub.thread.id,
+          status: viaHub.thread.status, messages: viaHub.thread.messages.length,
+        });
+      }
+
       const t = addMessage(slug, thread, 'claude', body);
       appendEvent('CLAUDE_REPLY', slug, { threadId: thread });
-      // Nudge the hub so open browsers repaint even if the watcher missed it.
-      const port = readHubState().port || DEFAULT_PORT;
-      fetch(`http://localhost:${port}/api/p/${slug}/threads`).catch(() => {});
-      return say({ ok: true, threadId: t.id, status: t.status, messages: t.messages.length });
+      return say({ ok: true, via: 'file', threadId: t.id, status: t.status, messages: t.messages.length });
     }
 
     case 'resolve': {
       const slug = safeSlug(args.slug || die('--slug required'));
+      const thread = args.thread || die('--thread required');
+      const viaHub = await hubWrite(
+        `/api/p/${encodeURIComponent(slug)}/threads/${encodeURIComponent(thread)}`,
+        { method: 'PATCH', body: JSON.stringify({ status: 'resolved' }) }
+      );
+      if (viaHub?.thread) return say({ ok: true, via: 'hub', threadId: viaHub.thread.id });
+
       const data = readThreads(slug);
-      const t = data.threads.find((x) => x.id === args.thread);
-      if (!t) die(`no such thread: ${args.thread}`);
+      const t = data.threads.find((x) => x.id === thread);
+      if (!t) die(`no such thread: ${thread}`);
       t.status = 'resolved';
       t.updatedAt = new Date().toISOString();
       writeThreads(slug, data);
-      return say({ ok: true, threadId: t.id });
+      return say({ ok: true, via: 'file', threadId: t.id });
     }
 
     case 'difit-reply':

@@ -121,27 +121,35 @@ function alignAttr(a) {
 
 function makeMarkdown(renderCode) {
   const marked = new Marked({ gfm: true, breaks: false });
-  const pending = [];
   marked.use({
-    async: true,
-    walkTokens(token) {
-      if (token.type === 'code') {
-        // Swap the token for an html token holding a placeholder, then splice the
-        // Shiki output back in after parsing - keeps marked from escaping it.
-        const key = ` XCODEX${pending.length}X `;
-        pending.push(renderCode(token.text, token.lang, { numbers: false }));
-        token.type = 'html';
-        token.text = key;
-        token.block = true;
-      }
-    },
     renderer: {
+      // Raw HTML is ESCAPED, never emitted. Pages routinely quote untrusted
+      // text - GitHub issue bodies, PR descriptions, discussion comments - and
+      // an <img onerror> in one of those would otherwise run with access to the
+      // hub API on localhost.
+      html(token) {
+        return esc(token.raw ?? token.text ?? '');
+      },
+      code(token) {
+        // Shiki's highlighter is synchronous, so render straight into place.
+        return renderCode(token.text, token.lang, { numbers: false });
+      },
       link(token) {
-        const href = esc(token.href || '');
-        const external = /^https?:/i.test(token.href || '');
+        const raw = String(token.href || '');
+        // Only allow schemes that cannot execute script.
+        const safe = /^(https?:|mailto:|#|\/|\.)/i.test(raw) ? raw : '#';
+        const href = esc(safe);
+        const external = /^https?:/i.test(safe);
         const title = token.title ? ` title="${esc(token.title)}"` : '';
         const rel = external ? ' target="_blank" rel="noopener noreferrer"' : '';
         return `<a href="${href}"${title}${rel}>${this.parser.parseInline(token.tokens)}</a>`;
+      },
+      image(token) {
+        const raw = String(token.href || '');
+        if (!/^(https?:|data:image\/)/i.test(raw)) return esc(token.text || '');
+        return `<img src="${esc(raw)}" alt="${esc(token.text || '')}"${
+          token.title ? ` title="${esc(token.title)}"` : ''
+        } loading="lazy">`;
       },
       table(token) {
         const head = token.header
@@ -162,9 +170,7 @@ function makeMarkdown(renderCode) {
 
   return async function md(src) {
     if (src == null || src === '') return '';
-    pending.length = 0;
-    const html = await marked.parse(String(src));
-    return html.replace(/ XCODEX(\d+)X /g, (_, i) => pending[Number(i)] ?? '');
+    return marked.parse(String(src));
   };
 }
 
@@ -783,8 +789,11 @@ export async function render(slug, contentInput, { base = '' } = {}) {
   content.slug = s;
   content.meta = content.meta || {};
   content.meta.generatedAt = new Date().toISOString();
-  // Page-level language wins, then the hub default, then Hinglish.
-  content.language = (content.language || readConfig().language || DEFAULT_LANGUAGE)
+  // Explicit request wins, then whatever this page was last rendered in, then
+  // the hub default. Without the stored-meta step a re-render from a source
+  // file that never carried `language` would silently revert the page.
+  const prevLanguage = readMeta(s).language;
+  content.language = (content.language || prevLanguage || readConfig().language || DEFAULT_LANGUAGE)
     .toString().toLowerCase().trim();
   const t = strings(content.language);
 

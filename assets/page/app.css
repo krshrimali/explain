@@ -1066,3 +1066,8 @@ body.threads-full.threads-open .shell { padding-right: 0; }
 .marker--saved { border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .marker--saved .marker-pin { background: var(--warn); }
 .sm-owner { margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+
+/* a resolved thread is finished - visible under All, but visibly done */
+.st--resolved { background: var(--surface-3); color: var(--text-3); }
+.thread--resolved { opacity: .72; }
+.thread--resolved .thread-num { background: var(--text-3); }
